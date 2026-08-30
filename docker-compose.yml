@@ -1,0 +1,97 @@
+name: tiktok-v2
+
+services:
+  # --- yt-dlp Control Center (lean, tanpa redis) ---
+  ytdlp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tiktok-ytdlp
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - STORAGE_DIR=/app/storage
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+    volumes:
+      - ./storage:/app/storage
+      - ytdlp_downloads:/app/storage/downloads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ytdlp/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - app_net
+
+  # --- Full stack untuk TikTok Clipper (butuh redis) ---
+  # Jalankan dengan: docker compose --profile full up -d
+  redis:
+    image: redis:7-alpine
+    container_name: tiktok-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --save 60 1
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app_net
+    profiles:
+      - full
+
+  api:
+    extends:
+      service: ytdlp
+    container_name: tiktok-api
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tiktok-worker
+    restart: unless-stopped
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - .env
+    environment:
+      - STORAGE_DIR=/app/storage
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ./storage:/app/storage
+      - ytdlp_downloads:/app/storage/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+    profiles:
+      - full
+
+networks:
+  app_net:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+  ytdlp_downloads:
+    driver: local

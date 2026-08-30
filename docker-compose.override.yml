@@ -1,0 +1,12 @@
+# Dev override: hot-reload, bukan untuk produksi
+# Aktif otomatis jika file ini ada. Untuk prod, jalankan:
+#   docker compose -f docker-compose.yml up -d
+services:
+  ytdlp:
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+      - ./storage:/app/storage
+      - /app/.venv
+    environment:
+      - ENV=development
