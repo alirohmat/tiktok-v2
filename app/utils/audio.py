@@ -68,11 +68,16 @@ def chunk_audio(
     overlap_sec: float = 0.0,
 ) -> list[tuple[Path, float, float]]:
     """
-    Split audio into chunks of chunk_sec seconds via ffmpeg -ss/-t.
-    Returns list of (chunk_path, start_time, duration).
+    Split audio untuk Groq free-tier:
+    - 180s default -> ~5.7 MB @16k mono, aman untuk podcast 2 jam (40 chunk)
+    - jika total > 3600s, tetap 180s (jangan perbesar, jaga <25 MB)
+    - tumpuk log untuk 429: chunk kecil lebih mudah retry
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     total = get_duration(audio_path)
+    # clamp untuk test (3s) dan prod (180s)
+    chunk_sec = max(1, min(300, chunk_sec))
+    # jika podcast sangat panjang (>10k detik), jangan perbesar chunk
     chunks: list[tuple[Path, float, float]] = []
     idx = 0
     start = 0.0

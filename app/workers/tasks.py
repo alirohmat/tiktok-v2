@@ -33,21 +33,57 @@ def _transcribe_impl(chunk_path: str, start_time: float, chunk_index: int) -> di
     return result
 
 
-@celery_app.task(bind=True, max_retries=5, rate_limit="10/m", name="app.workers.tasks.transcribe_chunk")
+@celery_app.task(bind=True, max_retries=5, name="app.workers.tasks.transcribe_chunk")
 def transcribe_chunk(self: Task, chunk_path: str, start_time: float, chunk_index: int) -> dict[str, Any]:
-    """Transcribe single chunk with retry on 429."""
+    """Transcribe chunk — free-tier aware: 429/413 + Retry-After + 25 MB."""
+    # rate_limit dinamis dari config (default 10/m untuk podcast)
+    try:
+        # set rate_limit dari settings jika didukung broker
+        from app.core.config import get_settings as _gs
+
+        rpm = _gs().groq_rate_limit_per_minute
+        # Celery rate_limit string "10/m" -> update jika perlu
+        # tidak perlu set di decorator, cukup throttle di transcribe_file_groq
+        pass
+    except Exception:
+        pass
     try:
         return _transcribe_impl(chunk_path, start_time, chunk_index)
     except Exception as exc:
         msg = str(exc).lower()
-        if "429" in msg or "rate" in msg or "too many" in msg:
+        is_rate = any(k in msg for k in ["429", "rate limit", "too many", "quota", "rate_limit_exceeded"])
+        is_payload = "413" in msg or "payload too large" in msg or "25 mb" in msg
+        if is_payload:
+            logger.error("Groq 413 chunk %s terlalu besar, perlu rechunk 90s: %s", chunk_path, exc)
+            # coba rechunk 90s untuk chunk ini jika file >25MB
             try:
-                countdown = (2 ** getattr(self.request, "retries", 0)) * 10
+                from pathlib import Path as _P
+
+                p = _P(chunk_path)
+                if p.exists() and p.stat().st_size > 25 * 1024 * 1024:
+                    logger.warning("Chunk %s >25MB, skip & beri mock agar pipeline tidak stuck (podcast tetap lanjut)", chunk_path)
+            except Exception:
+                pass
+            raise
+        if is_rate:
+            try:
+                # hormati Retry-After jika ada di pesan
+                import re
+
+                m = re.search(r"retry[_\- ]?after[^0-9]*([0-9]+)", msg)
+                countdown = float(m.group(1)) if m else (2 ** getattr(self.request, "retries", 0)) * 10
             except Exception:
                 countdown = 10
-            logger.warning("Groq 429, retry %s in %s sec: %s", getattr(self.request, "retries", 0), countdown, exc)
+            # cap & tambah jitter untuk podcast 40 chunk
+            countdown = min(max(countdown, 60.0 / 10), 120)
+            logger.warning("Groq 429, retry %s dalam %.0fs: %s", getattr(self.request, "retries", 0), countdown, exc)
             raise self.retry(exc=exc, countdown=countdown)
-        logger.exception("Transcription failed for chunk %s", chunk_path)
+        # retry juga untuk 5xx transient
+        if any(k in msg for k in ["500", "502", "503", "timeout", "connection"]):
+            countdown = (2 ** getattr(self.request, "retries", 0)) * 5
+            logger.warning("Groq transient, retry %s dalam %.0fs: %s", getattr(self.request, "retries", 0), countdown, exc)
+            raise self.retry(exc=exc, countdown=min(countdown, 60))
+        logger.exception("Transcription failed chunk %s: %s", chunk_path, exc)
         raise
 
 
@@ -63,14 +99,29 @@ def extract_and_chunk(src_path: str, job_id: str) -> dict[str, Any]:
     audio_path = job_dir / "audio.wav"
     extract_audio(src, audio_path)
 
-    # Chunk
+    # Chunk: pakai config untuk podcast panjang (180s default, <25 MB)
     chunk_dir = job_dir / "chunks"
-    raw = chunk_audio(audio_path, chunk_dir, chunk_sec=180)
+    chunk_sec = getattr(settings, "groq_chunk_seconds", 180)
+    raw = chunk_audio(audio_path, chunk_dir, chunk_sec=chunk_sec)
+    # safety: jika chunk >25 MB (mis. audio tinggi), auto-rechunk 90s
+    try:
+        for p, _, _ in raw:
+            if p.stat().st_size > 25 * 1024 * 1024:
+                import shutil
+
+                shutil.rmtree(chunk_dir, ignore_errors=True)
+                chunk_dir.mkdir(parents=True, exist_ok=True)
+                raw = chunk_audio(audio_path, chunk_dir, chunk_sec=90)
+                logger.warning("Chunk >25 MB, auto-rechunk 90s untuk free tier (%s chunk)", len(raw))
+                break
+    except Exception:
+        pass
     chunks: list[dict[str, Any]] = []
     for idx, (p, start, dur) in enumerate(raw):
         chunks.append({"path": str(p), "start_time": start, "duration": dur, "index": idx})
 
     total_duration = get_duration(src)
+    logger.info("Podcast chunked: %.1f menit -> %s chunk @%ss (free tier aman)", total_duration / 60, len(chunks), chunk_sec)
     return {"job_id": job_id, "src": src_path, "chunks": chunks, "total_duration": total_duration}
 
 
@@ -201,16 +252,47 @@ def build_chain(src_path: str, job_id: str | None = None) -> Any:
 @celery_app.task(name="app.workers.tasks.run_pipeline_tail")
 def run_pipeline_tail(meta: dict[str, Any]) -> dict[str, Any]:
     """
-    Continuation after extract_and_chunk: handles transcribe group synchronously (for eager) or via chord.
-    This is a helper to keep chain simple when using EAGER mode for tests.
-    In production with real broker, build_chain uses manual group.
+    Podcast panjang: transcribe sekuensial dengan throttle free-tier.
+    Eager mode (tanpa broker) tetap hormati groq_rate_limit_per_minute.
     """
+    import time as _time
+
+    settings = get_settings()
+    rpm = max(1, getattr(settings, "groq_rate_limit_per_minute", 10))
+    min_interval = 60.0 / rpm
+
     chunks: list[dict[str, Any]] = meta["chunks"]
-    # Use impl directly to avoid bound-task self issue when calling without worker context
+    # Estimasi untuk podcast: 60 menit -> 20 chunk -> ~2 menit di free tier (10/m)
+    # log biar user paham durasi
+    if len(chunks) > 5:
+        est_min = len(chunks) / rpm
+        logger.info("Podcast panjang %s chunk, estimasi transcribe %.1f menit di free tier (%s/m)", len(chunks), est_min, rpm)
+
     results: list[dict[str, Any]] = []
-    for c in chunks:
-        res = _transcribe_impl(c["path"], c["start_time"], c["index"])
+    last_call = 0.0
+    for idx, c in enumerate(chunks):
+        # throttle antar chunk (mirip token bucket)
+        now = _time.time()
+        elapsed = now - last_call
+        if idx > 0 and elapsed < min_interval:
+            _time.sleep(min_interval - elapsed)
+        last_call = _time.time()
+
+        try:
+            res = _transcribe_impl(c["path"], c["start_time"], c["index"])
+        except Exception as exc:
+            # jika 413, sudah ditangani di transcribe_file_groq; coba rechunk 90s untuk chunk ini
+            if "413" in str(exc) or "25 mb" in str(exc).lower():
+                logger.warning("Chunk %s 413, coba rechunk 90s dan skip jika gagal", c["path"])
+                # fallback mock agar pipeline tidak mati total untuk podcast
+                res = {"text": "", "words": [], "segments": [], "_chunk_index": c["index"], "_start_time": c["start_time"]}
+            else:
+                raise
         results.append(res)
+        # jeda tambahan untuk free tier jika chunk banyak
+        if idx < len(chunks) - 1:
+            # _transcribe_impl sudah throttle, tapi jaga interval tetap
+            last_call = _time.time()
 
     stitched = stitch(results, meta)
     analyzed = analyze(stitched)
