@@ -1,6 +1,7 @@
-# Dev override: hot-reload, bukan untuk produksi
-# Aktif otomatis jika file ini ada. Untuk prod, jalankan:
+# Dev override: hot-reload, HANYA untuk development lokal
+# File ini otomatis aktif jika ada. Untuk PROD stabil jalankan:
 #   docker compose -f docker-compose.yml up -d
+# atau rename: mv docker-compose.override.yml docker-compose.override.yml.bak
 services:
   ytdlp:
     command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload

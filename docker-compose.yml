@@ -1,11 +1,14 @@
 name: tiktok-v2
 
 services:
-  # --- yt-dlp Control Center (lean, tanpa redis) ---
+  # --- yt-dlp + DNA Clipper Lean (tanpa redis, stabil untuk deploy cepat) ---
+  # Sumber utama: ytdlp -> langsung clip via /api/clip/from-download
+  # Jalan default: docker compose up -d  (tanpa --profile)
   ytdlp:
     build:
       context: .
       dockerfile: Dockerfile
+    image: tiktok-v2:latest
     container_name: tiktok-ytdlp
     restart: unless-stopped
     ports:
@@ -20,13 +23,18 @@ services:
       - ./storage:/app/storage
       - ytdlp_downloads:/app/storage/downloads
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ytdlp/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/ytdlp/health || curl -f http://localhost:8000/health || exit 1"]
       interval: 30s
       timeout: 5s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 20s
     networks:
       - app_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # --- Full stack untuk TikTok Clipper (butuh redis) ---
   # Jalankan dengan: docker compose --profile full up -d
@@ -50,6 +58,8 @@ services:
     profiles:
       - full
 
+  # Full stack Clipper dengan Redis+CELERY untuk antrian paralel (podcast panjang 40+ chunk)
+  # Jalankan: docker compose --profile full up -d
   api:
     extends:
       service: ytdlp
@@ -58,6 +68,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
     profiles:
       - full
 
@@ -65,9 +80,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: tiktok-v2:latest
     container_name: tiktok-worker
     restart: unless-stopped
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2 --without-heartbeat --without-gossip
     env_file:
       - .env
     environment:
@@ -81,8 +97,20 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     networks:
       - app_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping | grep -q pong || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
     profiles:
       - full
 
