@@ -26,17 +26,18 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
     && yt-dlp --version && ffmpeg -version | head -n1
 
-# App code
+# App code - COPY with fallback for optional dirs (assets/fixtures may not exist in fresh clone)
 COPY app ./app
 COPY storage ./storage
-COPY assets ./assets
-COPY fixtures ./fixtures
 COPY .env.example .env.example
+# Ensure storage + optional dirs exist; do NOT hard-require assets/fixtures in build context (fresh clone may lack them)
+RUN mkdir -p assets fixtures storage/downloads storage/uploads storage/renders storage/previews storage/cache \
+    && chmod -R 775 storage
 
-# Ensure storage dirs exist with correct perms (downloads persisten) + fonts
-RUN mkdir -p storage/downloads storage/uploads storage/renders storage/previews storage/cache \
+# Ensure storage dirs exist with correct perms (downloads persisten) + fonts and entrypoint
+RUN mkdir -p storage/downloads storage/uploads storage/renders storage/previews storage/cache assets fixtures \
     && chmod -R 775 storage \
-    && printf '#!/bin/sh\nset -e\nif [ ! -f /app/.env ] && [ -f /app/.env.example ]; then cp /app/.env.example /app/.env; echo "[entrypoint] .env created from .env.example"; fi\n# ensure storage writable for appuser\nmkdir -p /app/storage/downloads /app/storage/uploads /app/storage/renders /app/storage/previews /app/storage/cache\nchown -R 1000:1000 /app/storage 2>/dev/null || true\nexec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+    && printf '#!/bin/sh\nset -e\nif [ ! -f /app/.env ] && [ -f /app/.env.example ]; then cp /app/.env.example /app/.env; echo "[entrypoint] .env created from .env.example"; fi\n# ensure storage writable for appuser\nmkdir -p /app/storage/downloads /app/storage/uploads /app/storage/renders /app/storage/previews /app/storage/cache /app/assets /app/fixtures\nchown -R 1000:1000 /app/storage 2>/dev/null || true\nchown -R 1000:1000 /app/assets /app/fixtures 2>/dev/null || true\nexec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Create non-root user (stable uid 1000)
 RUN useradd -m -u 1000 -s /bin/bash appuser \
