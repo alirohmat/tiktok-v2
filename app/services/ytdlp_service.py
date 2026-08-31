@@ -124,34 +124,57 @@ def parse_progress_line(line: str) -> dict[str, Any] | None:
     return None
 
 
-async def fetch_info(url: str, no_playlist: bool = True) -> dict[str, Any]:
-    """Run yt-dlp --dump-json --no-download to get metadata."""
+async def fetch_info(url: str, no_playlist: bool = True, timeout: float = 25.0) -> dict[str, Any]:
+    """Run yt-dlp --dump-json --no-download to get metadata. Timeout & anti-bengong."""
     if not url or not url.startswith(("http://", "https://")):
         raise ValueError("URL harus diawali http:// atau https://")
 
-    cmd = YTDLP_BASE + [
+    base_flags = [
         "--dump-json",
         "--no-download",
         "--no-warnings",
         "--no-playlist" if no_playlist else "--yes-playlist",
         "--skip-download",
-        url,
+        "--no-check-certificate",
+        "--socket-timeout", "15",
+        "--retries", "2",
+        "--extractor-retries", "1",
+        "--ignore-errors",
+        # Try to bypass YouTube bot detection on datacenter IP (Koyeb)
+        "--extractor-args", "youtube:player_client=android,web",
     ]
-    # Remove empty?
-    cmd = [c for c in cmd if c]
 
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    async def _run(cmd: list[str]) -> tuple[int, bytes, bytes]:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            raise RuntimeError(f"yt-dlp timeout {timeout:.0f}s — YouTube mungkin memblokir IP server (datacenter) atau jaringan lambat. Coba lagi, ganti link TikTok/IG, atau langsung klik 'Download' tanpa 'Cek Info'")
+        return proc.returncode or 0, stdout, stderr
+
+    # Primary attempt
+    cmd = YTDLP_BASE + base_flags + [url]
+    cmd = [c for c in cmd if c]
+    returncode, stdout, stderr = await _run(cmd)
+    if returncode != 0:
         err = stderr.decode(errors="ignore").strip() or stdout.decode(errors="ignore").strip()
-        # trim long
-        if len(err) > 800:
-            err = err[-800:]
-        raise RuntimeError(err or f"yt-dlp gagal (code {proc.returncode})")
+        # If YouTube bot detection, retry without android client fallback is already included, but give friendly msg
+        if len(err) > 900:
+            err = err[-900:]
+        # Common YouTube blocks: "Sign in to confirm", "bot", "unavailable"
+        lower = err.lower()
+        if any(k in lower for k in ["sign in", "bot", "unavailable", "private video", "video unavailable"]):
+            err = err + " — Tip: YouTube sering blokir IP datacenter (Koyeb). Coba link TikTok/Instagram, atau klik 'Download' langsung (lebih toleran) tanpa 'Cek Info'."
+        raise RuntimeError(err or f"yt-dlp gagal (code {returncode})")
 
     text = stdout.decode(errors="ignore").strip()
     # yt-dlp outputs one JSON per video; for playlist it outputs multiple lines => take first

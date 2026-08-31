@@ -215,9 +215,14 @@ async function doFetch(){
   hideError();fetchBtn.disabled=true;fetchBtn.innerHTML='<span class="w-4 h-4 border-2 border-zinc-500 border-t-white rounded-full animate-spin"></span> Memuat...';
   $("#previewSkeleton").classList.remove("hidden");$("#previewMeta").classList.add("hidden");
   $("#previewThumb").innerHTML='<div class="w-full h-full shimmer"></div>';
-  try{const r=await fetch(API+"/api/ytdlp/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url,no_playlist:$("#playlist").value==="no"})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal ambil info");currentInfo=j.data;renderPreview(currentInfo);toast("Info berhasil dimuat");}
-  catch(e){$("#previewThumb").innerHTML='<div class="p-6 text-center text-sm text-red-400">'+(e.message||e)+'</div>';toast(e.message,false);}
-  finally{fetchBtn.disabled=false;fetchBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg> Cek Info';$("#previewSkeleton").classList.add("hidden");}
+  const ctrl=new AbortController(); const to=setTimeout(()=>ctrl.abort(), 30000);
+  try{const r=await fetch(API+"/api/ytdlp/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url,no_playlist:$("#playlist").value==="no"}), signal: ctrl.signal});clearTimeout(to);const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal ambil info");currentInfo=j.data;renderPreview(currentInfo);toast("Info berhasil dimuat");}
+  catch(e){
+    clearTimeout(to);
+    const msg = e.name==='AbortError' ? 'Timeout 30s — YouTube mungkin blokir IP server. Coba klik Download langsung tanpa Cek Info, atau pakai link TikTok/IG.' : (e.message||e);
+    $("#previewThumb").innerHTML='<div class="p-6 text-center text-sm text-red-400">'+msg+'<br><br><button onclick="doDownload()" class="mt-2 px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs">Coba Download langsung</button></div>';toast(msg,false);
+  }
+  finally{clearTimeout(to);fetchBtn.disabled=false;fetchBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg> Cek Info';$("#previewSkeleton").classList.add("hidden");}
 }
 function renderPreview(d){
   const thumb=d.thumbnail||(d.thumbnails&&d.thumbnails.length?d.thumbnails[d.thumbnails.length-1].url:"");
