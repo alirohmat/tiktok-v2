@@ -27,10 +27,13 @@ class ClipFromUrlRequest(BaseModel):
     no_playlist: bool = True
 
 
+# In-memory tracker for lean mode (tanpa redis) agar refresh tidak hilang
+CLIP_JOBS: dict[str, JobStatus] = {}
+
 def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
-    """Jalankan clip pipeline via Celery jika tersedia, fallback eager."""
+    """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking)."""
     settings = get_settings()
-    # Try Celery async
+    # Try Celery async (redis tersedia)
     try:
         import redis as redis_lib  # type: ignore[import-untyped]
 
@@ -39,26 +42,28 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
         from app.workers.tasks import run_full_pipeline
 
         run_full_pipeline.delay(str(src), job_id)  # type: ignore[attr-defined]
-        return JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0)
+        js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0)
+        CLIP_JOBS[job_id] = js
+        return js
     except Exception:
-        from app.workers.tasks import run_full_pipeline
-        from app.workers.celery_app import celery_app
+        pass
+    # Fallback eager: jalankan di background thread agar HTTP tidak block (fix bug pending hilang saat refresh)
+    import threading
 
+    def _bg():
         try:
-            celery_app.conf.task_always_eager = True  # type: ignore[attr-defined]
-        except Exception:
-            pass
-        try:
+            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="STARTED", phase="processing", progress=0.1)
+            from app.workers.tasks import run_full_pipeline
+
             result = run_full_pipeline(str(src), job_id)  # type: ignore[call-arg]
-            outputs: list[str] = result.get("outputs", [])
-            return JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=outputs)
+            outputs: list[str] = result.get("outputs", []) if isinstance(result, dict) else []
+            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=outputs)
         except Exception as e:
-            return JobStatus(job_id=job_id, status="FAILURE", phase="error", error=str(e))
-        finally:
-            try:
-                celery_app.conf.task_always_eager = False  # type: ignore[attr-defined]
-            except Exception:
-                pass
+            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="FAILURE", phase="error", error=str(e))
+
+    CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0)
+    threading.Thread(target=_bg, daemon=True).start()
+    return CLIP_JOBS[job_id]
 
 
 @router.get("/health")
@@ -103,6 +108,20 @@ async def clip_video(file: UploadFile = File(...)) -> JobStatus:
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 def get_job(job_id: str) -> JobStatus:
+    # 1) Cek in-memory CLIP_JOBS (lean mode non-blocking, persist refresh)
+    if job_id in CLIP_JOBS:
+        # Jika sudah SUCCESS di memory tapi renders belum ke-detect, sinkronkan
+        js = CLIP_JOBS[job_id]
+        if js.status == "SUCCESS" and js.result:
+            return js
+        # Update dari storage jika sudah render
+        settings = get_settings()
+        renders = list((settings.storage_path / "renders" / job_id).glob("*.mp4"))
+        if renders:
+            js2 = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=[str(p) for p in renders])
+            CLIP_JOBS[job_id] = js2
+            return js2
+        return js
     # Try Celery result backend (optional)
     try:
         from app.workers.celery_app import celery_app  # type: ignore[import-untyped]
@@ -232,12 +251,13 @@ def clip_renders() -> dict:
 
 @router.get("/clip/jobs")
 def clip_jobs() -> dict:
-    """List clip jobs (scan renders + uploads)."""
+    """List clip jobs (scan renders + uploads + in-memory pending)."""
     settings = get_settings()
     jobs: list[dict] = []
     renders_dir = settings.storage_path / "renders"
     uploads_dir = settings.storage_path / "uploads"
     seen: set[str] = set()
+    # 1) renders (selesai)
     if renders_dir.exists():
         for d in renders_dir.iterdir():
             if d.is_dir() and (d / f"{d.name}.mp4").exists() or list(d.glob("*.mp4")):
@@ -245,11 +265,18 @@ def clip_jobs() -> dict:
                 if clips:
                     jobs.append({"job_id": d.name, "status": "SUCCESS", "files": clips})
                     seen.add(d.name)
+    # 2) in-memory CLIP_JOBS pending/started (fix hilang saat refresh)
+    for jid, js in CLIP_JOBS.items():
+        if jid not in seen:
+            jobs.append({"job_id": jid, "status": js.status, "phase": js.phase, "progress": js.progress, "error": js.error})
+            seen.add(jid)
     if uploads_dir.exists():
         for p in uploads_dir.iterdir():
             jid = p.stem
             if jid not in seen:
                 jobs.append({"job_id": jid, "status": "PROCESSING", "files": []})
+    # Sort: processing/pending first, then success
+    jobs.sort(key=lambda x: (0 if x["status"] in ("PENDING","STARTED","PROCESSING") else 1, x["job_id"]), reverse=False)
     return {"ok": True, "jobs": jobs}
 
 
