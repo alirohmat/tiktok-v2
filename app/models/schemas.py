@@ -131,3 +131,6 @@ class JobStatus(BaseModel):
     progress: float = 0.0
     result: list[str] | None = None
     error: str | None = None
+    logs: list[str] | None = None
+    started_at: float | None = None
+    finished_at: float | None = None

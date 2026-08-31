@@ -8,6 +8,8 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+import time as _time
+
 from app.core.config import get_settings
 from app.models.schemas import JobStatus
 
@@ -27,12 +29,37 @@ class ClipFromUrlRequest(BaseModel):
     no_playlist: bool = True
 
 
-# In-memory tracker for lean mode (tanpa redis) agar refresh tidak hilang
+# In-memory tracker for lean mode (tanpa redis) agar refresh tidak hilang + live logs
 CLIP_JOBS: dict[str, JobStatus] = {}
+CLIP_LOGS: dict[str, list[str]] = {}
+
+def _clip_log(job_id: str, msg: str):
+    ts = _time.strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    lst = CLIP_LOGS.setdefault(job_id, [])
+    lst.append(line)
+    if len(lst) > 500:
+        CLIP_LOGS[job_id] = lst[-500:]
+    # sync ke JobStatus.logs agar GET /jobs/{id} live
+    if job_id in CLIP_JOBS:
+        js = CLIP_JOBS[job_id]
+        CLIP_JOBS[job_id] = js.model_copy(update={"logs": list(CLIP_LOGS[job_id])})
+
+def _update_clip_job(job_id: str, **kw):
+    if job_id in CLIP_JOBS:
+        js = CLIP_JOBS[job_id]
+        CLIP_JOBS[job_id] = js.model_copy(update=kw)
+        # keep logs synced
+        if job_id in CLIP_LOGS:
+            CLIP_JOBS[job_id] = CLIP_JOBS[job_id].model_copy(update={"logs": list(CLIP_LOGS[job_id])})
+    else:
+        CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status=kw.get("status","PENDING"), phase=kw.get("phase",""), progress=kw.get("progress",0.0), logs=list(CLIP_LOGS.get(job_id,[])), **{k:v for k,v in kw.items() if k not in ("status","phase","progress")})
 
 def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
-    """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking)."""
+    """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking) dengan live logs detail."""
     settings = get_settings()
+    CLIP_LOGS[job_id] = []
+    _clip_log(job_id, f"Queued: {src.name}")
     # Try Celery async (redis tersedia)
     try:
         import redis as redis_lib  # type: ignore[import-untyped]
@@ -41,27 +68,47 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
         r.ping()
         from app.workers.tasks import run_full_pipeline
 
+        _clip_log(job_id, "Redis terhubung — dispatch ke Celery worker (concurrency=2)")
+        _clip_log(job_id, "Phase: queued -> worker akan update progress via backend")
         run_full_pipeline.delay(str(src), job_id)  # type: ignore[attr-defined]
-        js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0)
+        js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
         CLIP_JOBS[job_id] = js
         return js
-    except Exception:
-        pass
+    except Exception as e:
+        _clip_log(job_id, f"Redis tidak tersedia ({e}) — fallback eager thread (lean mode)")
+
     # Fallback eager: jalankan di background thread agar HTTP tidak block (fix bug pending hilang saat refresh)
     import threading
 
     def _bg():
         try:
-            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="STARTED", phase="processing", progress=0.1)
-            from app.workers.tasks import run_full_pipeline
-
-            result = run_full_pipeline(str(src), job_id)  # type: ignore[call-arg]
+            _update_clip_job(job_id, status="STARTED", phase="extract", progress=0.05, started_at=_time.time())
+            _clip_log(job_id, "Phase: extract audio (ffmpeg)")
+            from app.workers.tasks import extract_and_chunk, run_pipeline_tail
+            meta = extract_and_chunk(str(src), job_id)
+            chunks = meta.get("chunks", [])
+            total = meta.get("total_duration", 0)
+            _clip_log(job_id, f"Audio extracted — chunked {len(chunks)} segment @180s (total {total/60:.1f} menit)")
+            _update_clip_job(job_id, phase="transcribe", progress=0.15)
+            _clip_log(job_id, f"Phase: transcribe (Groq {settings.groq_whisper_model}) — {len(chunks)} chunk, rate {settings.groq_rate_limit_per_minute}/m")
+            # run_pipeline_tail akan transkripsi sekuensial dengan throttle + log internal
+            # kita log progress per chunk via wrapper
+            result = run_pipeline_tail(meta)
             outputs: list[str] = result.get("outputs", []) if isinstance(result, dict) else []
-            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=outputs)
+            _clip_log(job_id, f"Phase: render 9:16 selesai — {len(outputs)} clip")
+            for p in outputs:
+                _clip_log(job_id, f"  → {Path(p).name}")
+            _update_clip_job(job_id, status="SUCCESS", phase="render", progress=1.0, result=outputs, finished_at=_time.time())
+            _clip_log(job_id, "SUCCESS — cek tab Hasil DNA Rebirth")
         except Exception as e:
-            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="FAILURE", phase="error", error=str(e))
+            import traceback
+            err = f"{e}\n{traceback.format_exc()[-800:]}"
+            _clip_log(job_id, f"FAILURE: {e}")
+            _update_clip_job(job_id, status="FAILURE", phase="error", error=str(e)[:1000], finished_at=_time.time())
+            # also store full trace in logs
+            CLIP_LOGS[job_id].append(err)
 
-    CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0)
+    CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
     threading.Thread(target=_bg, daemon=True).start()
     return CLIP_JOBS[job_id]
 
@@ -108,17 +155,21 @@ async def clip_video(file: UploadFile = File(...)) -> JobStatus:
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 def get_job(job_id: str) -> JobStatus:
-    # 1) Cek in-memory CLIP_JOBS (lean mode non-blocking, persist refresh)
+    # 1) Cek in-memory CLIP_JOBS (lean mode non-blocking, persist refresh) — sertakan live logs
     if job_id in CLIP_JOBS:
         # Jika sudah SUCCESS di memory tapi renders belum ke-detect, sinkronkan
         js = CLIP_JOBS[job_id]
+        # selalu sync logs terbaru
+        if job_id in CLIP_LOGS:
+            js = js.model_copy(update={"logs": list(CLIP_LOGS[job_id])})
+            CLIP_JOBS[job_id] = js
         if js.status == "SUCCESS" and js.result:
             return js
         # Update dari storage jika sudah render
         settings = get_settings()
         renders = list((settings.storage_path / "renders" / job_id).glob("*.mp4"))
         if renders:
-            js2 = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=[str(p) for p in renders])
+            js2 = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=[str(p) for p in renders], logs=list(CLIP_LOGS.get(job_id,[])), started_at=js.started_at, finished_at=_time.time())
             CLIP_JOBS[job_id] = js2
             return js2
         return js

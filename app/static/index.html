@@ -158,6 +158,14 @@
           <div id="clipJobsList" class="space-y-2 max-h-[300px] overflow-auto pr-1"><div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div></div>
           <div class="mt-3 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs"><p class="font-semibold text-zinc-300">Cara kerja Docker stabil:</p><p class="text-zinc-500 mt-1">Lean: <code>docker compose up -d</code> (eager, tanpa Redis). Full: <code>docker compose --profile full up -d</code> (Redis+CELERY antri paralel).</p></div>
         </div>
+        <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 overflow-hidden">
+          <button type="button" id="clipLogsToggle" class="w-full px-4 py-3 flex items-center justify-between hover:bg-zinc-800/50 transition"><span class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">›_</span> Log Clipper Live <span id="clipLogsDot" class="hidden w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span></span><span class="text-xs text-zinc-500">auto • detail per phase</span></button>
+          <div id="clipLogsBody" class=""><div class="flex items-center justify-between px-4 py-2 bg-zinc-950 border-y border-zinc-800"><span class="text-[11px] font-mono text-zinc-500">live • <span id="clipLogsJobId" class="text-zinc-400">-</span></span><div class="flex gap-1"><button type="button" id="copyClipLogs" class="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Copy</button><button type="button" id="clearClipLogs" class="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Clear</button></div></div><pre id="clipLogs" class="max-h-[320px] overflow-auto p-4 text-[11px] leading-5 font-mono text-zinc-400 bg-zinc-950 whitespace-pre-wrap break-all">Belum ada job clip — klik Jadikan Clipper untuk melihat log live
+Contoh: [14:22:10] Queued: video.mp4
+[14:22:11] Phase: extract audio (ffmpeg)
+[14:22:15] Phase: transcribe (Groq) — 5 chunk
+[14:23:00] Phase: render 9:16</pre></div>
+        </div>
         <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4">
           <h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-2">Upload manual (opsional)</h3>
           <p class="text-xs text-zinc-500 mb-3">Alternatif jika file bukan dari ytdlp.</p>
@@ -394,28 +402,49 @@ $("#clipUrlBtn").onclick=async()=>{
   $("#clipUrlBtn").disabled=true;$("#clipUrlBtn").textContent="⏳ Memulai...";
   try{const r=await fetch(API+"/clip/from-url",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url, quality:"best", format:"mp4"})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("One-click ytdlp+Clip dimulai: "+j.job_id);startClipPolling(j.job_id);}catch(e){toast(e.message||String(e),false);}finally{$("#clipUrlBtn").disabled=false;$("#clipUrlBtn").textContent="⚡ Clip dari URL";}
 };
+const clipLogsEl=$("#clipLogs");
 let activeClipJobs=new Set(JSON.parse(localStorage.getItem("activeClipJobs")||"[]"));
-function saveClipJobs(){try{localStorage.setItem("activeClipJobs", JSON.stringify([...activeClipJobs]));}catch{}}
+let currentClipJobId = localStorage.getItem("currentClipJobId") || [...activeClipJobs][0] || null;
+if(currentClipJobId) $("#clipLogsJobId").textContent=currentClipJobId.slice(0,8);
+function saveClipJobs(){try{localStorage.setItem("activeClipJobs", JSON.stringify([...activeClipJobs])); if(currentClipJobId) localStorage.setItem("currentClipJobId", currentClipJobId); }catch{}}
+function setCurrentClipJob(id){ currentClipJobId=id; try{localStorage.setItem("currentClipJobId", id);}catch{} $("#clipLogsJobId").textContent=id? id.slice(0,8):"-"; }
 function startClipPolling(jobId){
-  if(jobId)activeClipJobs.add(jobId);
+  if(jobId){ activeClipJobs.add(jobId); setCurrentClipJob(jobId); $("#clipLogsBody").classList.remove("hidden"); }
   saveClipJobs();
-  refreshClipJobs();refreshRenders();
+  refreshClipJobs();refreshRenders();refreshClipLogs();
   if(clipPollTimer)clearInterval(clipPollTimer);
   clipPollTimer=setInterval(async()=>{
     await refreshClipJobs();
-    // auto-cleanup SUCCESS/FAILURE after 5 min simpan di history renders, hapus dari pending
-    for(const id of [...activeClipJobs]){
-      try{
-        const r=await fetch(API+"/jobs/"+id); if(!r.ok) continue;
-        const j=await r.json();
-        if(j.status==="SUCCESS"||j.status==="FAILURE"){
-          // biarkan tampil 30 detik lalu hapus dari active (tetap ada di renders)
-          // tidak auto-hapus biar user lihat, tapi simpan history
-        }
-      }catch{}
-    }
+    await refreshClipLogs();
     await refreshRenders();
-  },2000);
+  },1500);
+}
+async function refreshClipLogs(){
+  const id = currentClipJobId || [...activeClipJobs][0];
+  if(!id){ return; }
+  if(!currentClipJobId && id) setCurrentClipJob(id);
+  try{
+    const r=await fetch(API+"/jobs/"+id);
+    if(!r.ok) return;
+    const j=await r.json();
+    const logs = j.logs || [];
+    const dot=$("#clipLogsDot");
+    const isRunning = j.status==="PENDING" || j.status==="STARTED" || j.status==="PROCESSING";
+    if(isRunning) dot.classList.remove("hidden"); else dot.classList.add("hidden");
+    if(logs.length){
+      const text = logs.join("\n");
+      if(clipLogsEl.textContent !== text){
+        const atBottom = clipLogsEl.scrollTop + clipLogsEl.clientHeight >= clipLogsEl.scrollHeight - 20;
+        clipLogsEl.textContent = text;
+        if(isRunning && atBottom) clipLogsEl.scrollTop = clipLogsEl.scrollHeight;
+        // auto open jika running
+        if(isRunning) $("#clipLogsBody").classList.remove("hidden");
+      }
+      $("#clipLogsJobId").textContent = id.slice(0,8) + " • " + j.status + " • " + (j.phase||"");
+    } else if(j.status!=="SUCCESS"){
+      clipLogsEl.textContent = `[${id.slice(0,8)}] ${j.status} • ${j.phase} • ${Math.round((j.progress||0)*100)}%`;
+    }
+  }catch(e){ console.error("clipLogs",e); }
 }
 async function refreshClipJobs(){
   const list=$("#clipJobsList");
@@ -436,7 +465,7 @@ async function refreshClipJobs(){
   const jobs=[];for(const id of activeClipJobs){try{const r=await fetch(API+"/jobs/"+id);if(!r.ok) throw new Error(r.status);const j=await r.json();jobs.push(j);}catch{}}
   $("#clipJobCount").textContent=jobs.length;
   if(!jobs.length){list.innerHTML='<div class="py-6 text-center text-zinc-500 text-sm">Menunggu...</div>';return;}
-  list.innerHTML=jobs.map(j=>{const st=escapeHtml(j.status);const pct=Math.min(100,Math.round((j.progress||0)*100));const isDone=st==="SUCCESS",isErr=st==="FAILURE";return `<div class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${pct}%</span></div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct}%"></div></div>${j.error?`<p class="mt-1 text-xs text-red-400 break-all">${escapeHtml(String(j.error)).slice(0,300)}</p>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=escapeHtml(f.split('/').pop());return `<a href="${API}/renders/${encodeURIComponent(j.job_id)}/${encodeURIComponent(name)}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}<div class="mt-2 flex gap-1"><button type="button" data-clear-clip="${j.job_id}" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700">Hapus dari daftar</button></div></div>`;}).join("");
+  list.innerHTML=jobs.map(j=>{const st=escapeHtml(j.status);const pct=Math.min(100,Math.round((j.progress||0)*100));const isDone=st==="SUCCESS",isErr=st==="FAILURE";return `<div data-clip-log="${j.job_id}" class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3 cursor-pointer hover:border-zinc-700"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${pct}%</span></div><div class="text-[11px] text-zinc-500 font-mono mt-1">${escapeHtml(j.phase||"")}</div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct}%"></div></div>${j.error?`<p class="mt-1 text-xs text-red-400 break-all">${escapeHtml(String(j.error)).slice(0,300)}</p>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=escapeHtml(f.split('/').pop());return `<a href="${API}/renders/${encodeURIComponent(j.job_id)}/${encodeURIComponent(name)}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}<div class="mt-2 flex gap-1"><button type="button" data-clear-clip="${j.job_id}" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700">Hapus dari daftar</button><button type="button" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800">Lihat log →</button></div></div>`;}).join("");
 }
 async function refreshRenders(){try{const r=await fetch(API+"/clip/renders");if(!r.ok) throw new Error(r.status);const j=await r.json();const renders=j.renders||[];$("#renderCount").textContent=renders.length;const grid=$("#rendersGrid");if(!renders.length)grid.innerHTML='<div class="col-span-full py-8 text-center text-zinc-500 text-sm">Belum ada hasil clip — jalankan clip dulu</div>';else grid.innerHTML=renders.slice(0,12).map(f=>`<div class="rounded-2xl bg-zinc-950 border border-zinc-800 overflow-hidden"><div class="aspect-[9/16] max-h-[280px] bg-black flex items-center justify-center relative"><video src="${escapeHtml(f.url)}" class="w-full h-full object-cover" muted preload="metadata"></video><span class="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/70 text-[11px] font-mono">${escapeHtml(f.job_id.slice(0,6))}</span></div><div class="p-3"><p class="text-xs font-semibold truncate" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</p><p class="text-[11px] text-zinc-500">${escapeHtml(f.size_human)}</p><div class="mt-2 flex gap-1.5"><a href="${escapeHtml(f.url)}" download class="flex-1 text-center px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold">⬇ Unduh</a><a href="${escapeHtml(f.url)}" target="_blank" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Play</a></div></div></div>`).join("");}catch(e){console.error(e);}}
 $("#refreshClipSources").onclick=refreshClipSources;$("#refreshClipJobs").onclick=refreshClipJobs;$("#refreshRenders").onclick=refreshRenders;
@@ -446,10 +475,21 @@ $("#uploadClipBtn").onclick=async()=>{
   const fd=new FormData();fd.append("file",file);$("#uploadStatus").textContent="Mengupload & clipping...";$("#uploadClipBtn").disabled=true;
   try{const r=await fetch(API+"/clip",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal upload");$("#uploadStatus").textContent="Job: "+j.job_id+" ("+j.status+")";toast("Upload clip dimulai: "+j.job_id);activeClipJobs.add(j.job_id);startClipPolling(); inp.value="";}catch(e){$("#uploadStatus").textContent="Error: "+(e.message||String(e));toast(e.message||String(e),false);}finally{$("#uploadClipBtn").disabled=false;}
 };
-// delegated clear clip job
+// delegated clear clip job + klik job untuk lihat log
 document.getElementById("clipJobsList").addEventListener("click", e=>{
-  const c=e.target.closest("[data-clear-clip]"); if(c){activeClipJobs.delete(c.dataset.clearClip); saveClipJobs(); refreshClipJobs(); toast("Dihapus dari daftar");}
+  const c=e.target.closest("[data-clear-clip]"); if(c){activeClipJobs.delete(c.dataset.clearClip); if(currentClipJobId===c.dataset.clearClip) setCurrentClipJob([...activeClipJobs][0]||null); saveClipJobs(); refreshClipJobs(); refreshClipLogs(); toast("Dihapus dari daftar"); return;}
+  const jobCard=e.target.closest("[data-clip-log]") || e.target.closest(".rounded-xl");
+  if(jobCard){
+    const id = jobCard.dataset.clipLog || [...activeClipJobs].find(id=> jobCard.textContent.includes(id.slice(0,8)));
+    if(id && activeClipJobs.has(id)){ setCurrentClipJob(id); refreshClipLogs(); $("#clipLogsBody").classList.remove("hidden"); }
+  }
 });
+$("#clipLogsToggle").onclick=()=>$("#clipLogsBody").classList.toggle("hidden");
+$("#copyClipLogs").onclick=async()=>{
+  try{await navigator.clipboard.writeText(clipLogsEl.textContent); toast("Clip log disalin");}
+  catch{const ta=document.createElement("textarea");ta.value=clipLogsEl.textContent;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("Clip log disalin");}
+};
+$("#clearClipLogs").onclick=()=>{clipLogsEl.textContent="Log dibersihkan — job tetap berjalan di background";};
 // visibility: pause polling when hidden to save VPS
 let bgPoll=null;
 document.addEventListener("visibilitychange", ()=>{
