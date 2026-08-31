@@ -8,13 +8,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# System deps: ffmpeg (clipper + yt-dlp merging), curl (healthcheck), ca-certificates, tini (init), fonts for drawtext
+# System deps: ffmpeg (clipper + yt-dlp merging), curl (healthcheck), ca-certificates, tini (init), fonts for drawtext, gosu (drop root)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     ca-certificates \
     tini \
     fonts-dejavu-core \
+    gosu \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
@@ -32,18 +33,18 @@ COPY storage ./storage
 COPY .env.example .env.example
 # Ensure storage + optional dirs exist; do NOT hard-require assets/fixtures in build context (fresh clone may lack them)
 RUN mkdir -p assets fixtures storage/downloads storage/uploads storage/renders storage/previews storage/cache \
-    && chmod -R 775 storage
+    && chmod -R 777 storage
 
 # Ensure storage dirs exist with correct perms (downloads persisten) + fonts and entrypoint
 RUN mkdir -p storage/downloads storage/uploads storage/renders storage/previews storage/cache assets fixtures \
-    && chmod -R 775 storage \
-    && printf '#!/bin/sh\nset -e\nif [ ! -f /app/.env ] && [ -f /app/.env.example ]; then cp /app/.env.example /app/.env; echo "[entrypoint] .env created from .env.example"; fi\n# ensure storage writable for appuser\nmkdir -p /app/storage/downloads /app/storage/uploads /app/storage/renders /app/storage/previews /app/storage/cache /app/assets /app/fixtures\nchown -R 1000:1000 /app/storage 2>/dev/null || true\nchown -R 1000:1000 /app/assets /app/fixtures 2>/dev/null || true\nexec "$@"\n' > /entrypoint.sh && chmod +x /entrypoint.sh
+    && chmod -R 777 storage \
+    && printf '#!/bin/sh\nset -e\nif [ ! -f /app/.env ] && [ -f /app/.env.example ]; then cp /app/.env.example /app/.env; echo "[entrypoint] .env created from .env.example"; fi\n# ensure storage writable for appuser (fix bind-mount ./storage owned root -> Permission denied cache)\nmkdir -p /app/storage/downloads /app/storage/uploads /app/storage/renders /app/storage/previews /app/storage/cache /app/assets /app/fixtures\nchown -R 1000:1000 /app/storage /app/assets /app/fixtures 2>/dev/null || true\nchmod -R 777 /app/storage 2>/dev/null || true\n# drop to appuser if running as root (gosu), else run directly\nif [ "$(id -u)" = "0" ]; then exec gosu appuser "$@" ; else exec "$@" ; fi\n' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Create non-root user (stable uid 1000)
 RUN useradd -m -u 1000 -s /bin/bash appuser \
     && chown -R appuser:appuser /app
 
-USER appuser
+USER root
 
 EXPOSE 8000
 
