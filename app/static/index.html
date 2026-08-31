@@ -34,16 +34,16 @@
     </div>
     <div class="flex items-center gap-2">
       <span id="healthBadge" class="hidden sm:inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-full bg-zinc-900 border border-zinc-800">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> <span id="healthText">loading...</span>
+        <span id="healthDot" class="w-2 h-2 rounded-full bg-zinc-500 animate-pulse"></span> <span id="healthText">loading...</span>
       </span>
       <a href="/docs" target="_blank" class="text-xs font-medium px-3 py-1.5 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 transition">API Docs</a>
-      <button onclick="document.getElementById('helpModal').showModal()" class="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:bg-zinc-800">?</button>
+      <button type="button" onclick="document.getElementById('helpModal').showModal()" class="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center hover:bg-zinc-800">?</button>
     </div>
   </div>
   <!-- Tabs -->
   <div class="max-w-[1320px] mx-auto px-4 sm:px-6 pb-3 flex gap-2">
-    <button id="tabBtnDl" onclick="switchTab('dl')" class="tab-active px-5 py-2 rounded-full border text-sm font-bold transition">⬇ ytdlp Download</button>
-    <button id="tabBtnClip" onclick="switchTab('clip')" class="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition">✂ DNA Clipper</button>
+    <button type="button" id="tabBtnDl" onclick="switchTab('dl')" class="tab-active px-5 py-2 rounded-full border text-sm font-bold transition">⬇ ytdlp Download</button>
+    <button type="button" id="tabBtnClip" onclick="switchTab('clip')" class="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition">✂ DNA Clipper</button>
     <span class="ml-auto hidden sm:flex items-center gap-2 text-xs text-zinc-500"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Sumber utama: ytdlp • Panel: Docker ready</span>
   </div>
 </header>
@@ -58,25 +58,25 @@
         <div class="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-brand-500 transition">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
         </div>
-        <input id="urlInput" placeholder="Tempel URL video di sini — https://www.youtube.com/watch?v=..." class="w-full pl-11 pr-36 py-3.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none text-sm font-medium placeholder:text-zinc-500 transition" />
+        <input id="urlInput" type="url" placeholder="Tempel URL video di sini — https://www.youtube.com/watch?v=..." class="w-full pl-11 pr-36 py-3.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none text-sm font-medium placeholder:text-zinc-500 transition" autocomplete="off" spellcheck="false" />
         <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex gap-1">
-          <button id="pasteBtn" class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold transition">Paste</button>
-          <button id="clearBtn" class="px-2 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          <button type="button" id="pasteBtn" class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold transition">Paste</button>
+          <button type="button" id="clearBtn" class="px-2 py-1.5 rounded-lg hover:bg-zinc-800 text-zinc-400 transition" aria-label="Clear"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
         </div>
       </div>
-      <button id="fetchBtn" class="px-6 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 font-semibold text-sm flex items-center justify-center gap-2 transition whitespace-nowrap">
+      <button type="button" id="fetchBtn" class="px-6 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 font-semibold text-sm flex items-center justify-center gap-2 transition whitespace-nowrap">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg> Cek Info
       </button>
-      <button id="downloadBtn" class="px-8 py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-600/20 transition whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed">
+      <button type="button" id="downloadBtn" class="px-8 py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-600/20 transition whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2"/></svg> Download
       </button>
     </div>
     <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
       <span class="text-zinc-500">Contoh cepat:</span>
-      <button data-sample="https://www.youtube.com/watch?v=dQw4w9WgXcQ" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">YouTube</button>
-      <button data-sample="https://www.tiktok.com/@khaby.lame/video/7190000000000000000" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">TikTok</button>
-      <button data-sample="https://www.instagram.com/reel/C1234567890/" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">Instagram</button>
-      <button onclick="switchTab('clip')" class="ml-auto px-3 py-1 rounded-full bg-brand-600 text-white font-semibold">→ Langsung Clip (DNA) tanpa download manual</button>
+      <button type="button" data-sample="https://www.youtube.com/watch?v=dQw4w9WgXcQ" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">YouTube</button>
+      <button type="button" data-sample="https://www.tiktok.com/@khaby.lame/video/7190000000000000000" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">TikTok</button>
+      <button type="button" data-sample="https://www.instagram.com/reel/C1234567890/" class="sampleBtn px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-800 hover:border-zinc-700">Instagram</button>
+      <button type="button" onclick="switchTab('clip')" class="ml-auto px-3 py-1 rounded-full bg-brand-600 text-white font-semibold">→ Langsung Clip (DNA) tanpa download manual</button>
     </div>
     <div id="urlError" class="hidden mt-3 px-3 py-2 rounded-lg bg-red-950/50 border border-red-900 text-red-300 text-xs"></div>
   </div>
@@ -86,7 +86,7 @@
       <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-bold text-sm tracking-wide flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">⚙️</span> Pengaturan Download</h2>
-          <button id="resetOpt" class="text-xs text-zinc-400 hover:text-zinc-200">Reset</button>
+          <button type="button" id="resetOpt" class="text-xs text-zinc-400 hover:text-zinc-200">Reset</button>
         </div>
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <label class="space-y-1.5"><span class="text-xs font-semibold text-zinc-400">Kualitas</span>
@@ -103,20 +103,20 @@
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
           <label class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 cursor-pointer"><input id="audioOnly" type="checkbox" class="w-4 h-4 rounded accent-brand-600" /><span class="text-xs font-semibold">Audio only</span></label>
           <label class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 cursor-pointer"><input id="withSubs" type="checkbox" class="w-4 h-4 rounded accent-brand-600" /><span class="text-xs font-semibold">Download subtitle</span></label>
-          <label class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 cursor-pointer"><input id="embedThumb" type="checkbox" class="w-4 h-4 rounded accent-brand-600" /><span class="text-xs font-semibold">Embed thumbnail</span></label>
+          <label id="embedThumbLabel" class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 cursor-pointer"><input id="embedThumb" type="checkbox" class="w-4 h-4 rounded accent-brand-600" /><span class="text-xs font-semibold">Embed thumbnail</span></label>
         </div>
         <details class="mt-4 group"><summary class="list-none flex items-center gap-2 text-xs font-semibold text-zinc-400 cursor-pointer hover:text-zinc-200"><span class="w-6 h-6 rounded-lg bg-zinc-950 border border-zinc-800 flex items-center justify-center group-open:rotate-180 transition">⌄</span> Opsi lanjutan</summary>
           <div class="mt-3 space-y-3"><input id="extraArgs" placeholder='Contoh: --write-thumbnail --concurrent-fragments 4' class="w-full px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono placeholder:text-zinc-600 focus:border-brand-600 outline-none" />
             <p class="text-[11px] text-zinc-500">Opsi berbahaya seperti <code class="px-1 py-0.5 rounded bg-zinc-800">--exec</code> akan difilter.</p></div></details>
       </div>
       <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5">
-        <div class="flex items-center justify-between mb-4"><h2 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">⬇</span> Antrian Download <span id="jobCount" class="ml-1 px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h2>
-          <div class="flex gap-2"><button id="refreshJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button><button id="clearJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Clear selesai</button></div></div>
+        <div class="flex items-center justify-between mb-4"><h2 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">⬇</span> Antrian Download <span id="jobCount" class="ml-1 px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span> <span id="jobsSpinner" class="hidden ml-2 w-3 h-3 border-2 border-zinc-600 border-t-white rounded-full animate-spin"></span></h2>
+          <div class="flex gap-2"><button type="button" id="refreshJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button><button type="button" id="clearJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Clear selesai</button></div></div>
         <div id="jobsList" class="space-y-3"><div class="py-10 text-center"><div class="w-14 h-14 mx-auto rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-xl mb-3">📥</div><p class="text-sm font-medium text-zinc-400">Belum ada download</p></div></div>
       </div>
       <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 overflow-hidden">
-        <button onclick="document.getElementById('logsBody').classList.toggle('hidden')" class="w-full px-4 sm:px-5 py-3 flex items-center justify-between hover:bg-zinc-800/50 transition"><span class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">›_</span> Log Konsol</span><span class="text-xs text-zinc-500">klik untuk buka/tutup</span></button>
-        <div id="logsBody" class="hidden border-t border-zinc-800"><pre id="logs" class="max-h-[240px] overflow-auto p-4 text-[11px] leading-5 font-mono text-zinc-400 bg-zinc-950 whitespace-pre-wrap break-all">Menunggu job...</pre></div>
+        <button type="button" id="logsToggle" class="w-full px-4 sm:px-5 py-3 flex items-center justify-between hover:bg-zinc-800/50 transition"><span class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">›_</span> Log Konsol <span id="logsLiveDot" class="hidden w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span></span><span class="text-xs text-zinc-500">klik untuk buka/tutup</span></button>
+        <div id="logsBody" class="hidden border-t border-zinc-800"><div class="flex items-center justify-between px-4 py-2 bg-zinc-950 border-b border-zinc-800"><span class="text-[11px] font-mono text-zinc-500">live • auto-scroll</span><button type="button" id="copyLogs" class="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Copy</button></div><pre id="logs" class="max-h-[240px] overflow-auto p-4 text-[11px] leading-5 font-mono text-zinc-400 bg-zinc-950 whitespace-pre-wrap break-all">Menunggu job...</pre></div>
       </div>
     </div>
     <div class="space-y-6">
@@ -124,11 +124,11 @@
         <div id="previewThumb" class="aspect-video bg-zinc-950 relative overflow-hidden flex items-center justify-center"><div class="text-center p-6"><div class="w-16 h-16 mx-auto rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-2xl mb-3">🎬</div><p class="text-sm font-medium text-zinc-300">Preview video akan muncul di sini</p><p class="text-xs text-zinc-500 mt-1">Klik “Cek Info” setelah tempel URL</p></div></div>
         <div class="p-4 sm:p-5"><div id="previewMeta" class="hidden"><h3 id="previewTitle" class="font-bold leading-tight line-clamp-2"></h3><div class="flex flex-wrap gap-2 mt-2 text-xs"><span id="previewUploader" class="px-2 py-1 rounded-full bg-zinc-950 border border-zinc-800"></span><span id="previewDuration" class="px-2 py-1 rounded-full bg-zinc-950 border border-zinc-800"></span><span id="previewExtractor" class="px-2 py-1 rounded-full bg-brand-950 border border-brand-900 text-brand-300"></span></div><p id="previewDesc" class="mt-3 text-xs leading-relaxed text-zinc-400 line-clamp-3"></p><div class="grid grid-cols-3 gap-2 mt-4 text-center"><div class="py-2 rounded-xl bg-zinc-950 border border-zinc-800"><div id="previewViews" class="font-bold text-sm">—</div><div class="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">Views</div></div><div class="py-2 rounded-xl bg-zinc-950 border border-zinc-800"><div id="previewLikes" class="font-bold text-sm">—</div><div class="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">Likes</div></div><div class="py-2 rounded-xl bg-zinc-950 border border-zinc-800"><div id="previewRes" class="font-bold text-sm">—</div><div class="text-[10px] text-zinc-500 uppercase tracking-widest font-semibold">Resolusi</div></div></div><details class="mt-4 group"><summary class="list-none flex items-center gap-2 text-xs font-semibold text-zinc-400 cursor-pointer">Format tersedia <span id="fmtCount" class="px-1.5 py-0.5 rounded bg-zinc-800">0</span> <span class="ml-auto group-open:rotate-180 transition">⌄</span></summary><div id="fmtList" class="mt-3 max-h-[220px] overflow-auto space-y-1.5 pr-1"></div></details></div><div id="previewSkeleton" class="hidden space-y-3"><div class="h-4 w-3/4 rounded shimmer"></div><div class="h-3 w-1/2 rounded shimmer"></div><div class="h-20 rounded-xl shimmer"></div></div></div>
       </div>
-      <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4"><h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-3">Storage</h3><div class="flex items-end justify-between"><div><div id="storageCount" class="text-2xl font-extrabold">0</div><div class="text-xs text-zinc-500">file tersimpan</div></div><div class="text-right"><div id="storageDir" class="text-[11px] font-mono text-zinc-500 break-all">storage/downloads</div><button id="openFolder" class="mt-1 text-xs font-semibold text-brand-400 hover:text-brand-300">Lihat file ↓</button></div></div></div>
+      <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4"><h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-3">Storage</h3><div class="flex items-end justify-between"><div><div id="storageCount" class="text-2xl font-extrabold">0</div><div class="text-xs text-zinc-500">file tersimpan</div></div><div class="text-right"><div id="storageDir" class="text-[11px] font-mono text-zinc-500 break-all">storage/downloads</div><button type="button" id="openFolder" class="mt-1 text-xs font-semibold text-brand-400 hover:text-brand-300">Lihat file ↓</button></div></div></div>
     </div>
   </div>
   <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5 mt-6">
-    <div class="flex items-center justify-between gap-4 mb-4"><h2 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">📁</span> File Tersimpan <span id="fileCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h2><div class="flex items-center gap-2"><input id="fileSearch" placeholder="Cari file..." class="hidden sm:block px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs w-40 focus:border-zinc-700 outline-none" /><button id="refreshFiles" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div></div>
+    <div class="flex items-center justify-between gap-4 mb-4"><h2 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">📁</span> File Tersimpan <span id="fileCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h2><div class="flex items-center gap-2"><input id="fileSearch" placeholder="Cari file..." class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs w-40 focus:border-zinc-700 outline-none" /><button type="button" id="refreshFiles" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div></div>
     <div id="filesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"><div class="col-span-full py-10 text-center text-zinc-500 text-sm">Memuat...</div></div>
   </div>
   </div><!-- end tab-dl -->
@@ -140,7 +140,7 @@
         <div><h2 class="font-extrabold text-lg flex items-center gap-2">✂ Digital DNA Rebirth & Retention Engine</h2><p class="text-sm text-zinc-300 mt-1">Sumber utama <b class="text-white">ytdlp</b> → Transcribe (Groq) → Muse Sutradara → Coverr B-Roll → Render 9:16 anti-duplicate. Panel ini mengendalikan seluruh pipeline.</p>
           <div class="flex gap-2 mt-3 text-xs"><span class="px-2.5 py-1 rounded-full bg-black/30 border border-white/20">Visual Hash Break</span><span class="px-2.5 py-1 rounded-full bg-black/30 border border-white/20">Ultrasonic 19kHz</span><span class="px-2.5 py-1 rounded-full bg-black/30 border border-white/20">Retention Hook 0-3s</span></div></div>
         <div class="flex flex-col gap-2 w-full lg:w-auto">
-          <div class="flex gap-2"><input id="clipUrlInput" placeholder="https://youtube.com/watch?v=... (langsung Clip!)" class="flex-1 lg:w-[360px] px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-700 text-sm placeholder:text-zinc-500 outline-none focus:border-brand-500" /><button id="clipUrlBtn" class="px-5 py-2.5 rounded-xl bg-white text-zinc-900 font-bold text-sm hover:bg-zinc-100">⚡ Clip dari URL</button></div>
+          <div class="flex gap-2"><input id="clipUrlInput" placeholder="https://youtube.com/watch?v=... (langsung Clip!)" class="flex-1 lg:w-[360px] px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-700 text-sm placeholder:text-zinc-500 outline-none focus:border-brand-500" /><button type="button" id="clipUrlBtn" class="px-5 py-2.5 rounded-xl bg-white text-zinc-900 font-bold text-sm hover:bg-zinc-100">⚡ Clip dari URL</button></div>
           <p class="text-[11px] text-zinc-400">Tanpa download manual: sistem ytdlp → clip otomatis. Atau pilih file di bawah.</p>
         </div>
       </div>
@@ -148,13 +148,13 @@
 
     <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_.8fr] gap-6 mt-6">
       <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5">
-        <div class="flex items-center justify-between mb-4"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white">🎬</span> Sumber ytdlp Siap Clip <span id="clipSourceCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button id="refreshClipSources" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div>
+        <div class="flex items-center justify-between mb-4"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-brand-600 flex items-center justify-center text-white">🎬</span> Sumber ytdlp Siap Clip <span id="clipSourceCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button type="button" id="refreshClipSources" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div>
         <p class="text-xs text-zinc-500 mb-3">File dari <code class="px-1 py-0.5 rounded bg-zinc-950 border border-zinc-800">storage/downloads</code> (sumber utama ytdlp). Klik <b class="text-zinc-300">Jadikan Clipper</b> untuk jalankan DNA Engine.</p>
         <div id="clipSourcesList" class="space-y-2 max-h-[520px] overflow-auto pr-1"><div class="py-8 text-center text-zinc-500 text-sm">Memuat sumber...</div></div>
       </div>
       <div class="space-y-6">
         <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5">
-          <div class="flex items-center justify-between mb-3"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">⏳</span> Clip Jobs <span id="clipJobCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button id="refreshClipJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs">Refresh</button></div>
+          <div class="flex items-center justify-between mb-3"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center">⏳</span> Clip Jobs <span id="clipJobCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button type="button" id="refreshClipJobs" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs">Refresh</button></div>
           <div id="clipJobsList" class="space-y-2 max-h-[300px] overflow-auto pr-1"><div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div></div>
           <div class="mt-3 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs"><p class="font-semibold text-zinc-300">Cara kerja Docker stabil:</p><p class="text-zinc-500 mt-1">Lean: <code>docker compose up -d</code> (eager, tanpa Redis). Full: <code>docker compose --profile full up -d</code> (Redis+CELERY antri paralel).</p></div>
         </div>
@@ -162,14 +162,14 @@
           <h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-2">Upload manual (opsional)</h3>
           <p class="text-xs text-zinc-500 mb-3">Alternatif jika file bukan dari ytdlp.</p>
           <input id="uploadInput" type="file" accept="video/*" class="w-full text-xs file:mr-3 file:px-3 file:py-1.5 file:rounded-full file:border-0 file:bg-brand-600 file:text-white file:font-bold" />
-          <button id="uploadClipBtn" class="mt-3 w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-semibold text-sm">Upload & Clip</button>
+          <button type="button" id="uploadClipBtn" class="mt-3 w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 font-semibold text-sm">Upload & Clip</button>
           <div id="uploadStatus" class="mt-2 text-xs text-zinc-400"></div>
         </div>
       </div>
     </div>
 
     <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5 mt-6">
-      <div class="flex items-center justify-between gap-4 mb-4"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-emerald-900 flex items-center justify-center">✨</span> Hasil DNA Rebirth (9:16) <span id="renderCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button id="refreshRenders" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div>
+      <div class="flex items-center justify-between gap-4 mb-4"><h3 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-emerald-900 flex items-center justify-center">✨</span> Hasil DNA Rebirth (9:16) <span id="renderCount" class="px-2 py-0.5 rounded-full bg-zinc-800 text-xs">0</span></h3><button type="button" id="refreshRenders" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">Refresh</button></div>
       <div id="rendersGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"><div class="col-span-full py-8 text-center text-zinc-500 text-sm">Belum ada hasil clip — jalankan clip dulu</div></div>
     </div>
   </div>
@@ -188,8 +188,9 @@
 const API="";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const urlInput=$("#urlInput"), fetchBtn=$("#fetchBtn"), downloadBtn=$("#downloadBtn"), urlError=$("#urlError"), logs=$("#logs");
-let currentInfo=null, pollTimer=null, clipPollTimer=null;
-function toast(m,ok=true){const t=$("#toast");t.textContent=m;t.className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium max-w-[90vw] z-50 "+(ok?"bg-zinc-900 border-zinc-800 text-zinc-100":"bg-red-950 border-red-900 text-red-200");t.classList.remove("hidden");setTimeout(()=>t.classList.add("hidden"),3000);}
+let currentInfo=null, pollTimer=null, clipPollTimer=null, jobsCache=[], filesCache=[];
+function escapeHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
+function toast(m,ok=true){const t=$("#toast");t.textContent=m;t.className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-3 rounded-xl border shadow-2xl text-sm font-medium max-w-[90vw] z-50 "+(ok?"bg-zinc-900 border-zinc-800 text-zinc-100":"bg-red-950 border-red-900 text-red-200");t.classList.remove("hidden");clearTimeout(t._to);t._to=setTimeout(()=>t.classList.add("hidden"), ok?3000:5000);}
 function fmtBytes(n){if(n==null)return "—";if(n<1024)return n+" B";if(n<1024*1024)return (n/1024).toFixed(1)+" KB";return (n/1024/1024).toFixed(2)+" MB";}
 function fmtViews(n){if(!n)return "—";if(n>1e6)return (n/1e6).toFixed(1)+"M";if(n>1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
 function fmtDur(s){if(!s&&s!==0)return "—";const m=Math.floor(s/60),sec=Math.floor(s%60);return m+":"+String(sec).padStart(2,"0");}
@@ -198,16 +199,63 @@ function switchTab(which){
   if(which==='clip'){dl.classList.add("hidden");cl.classList.remove("hidden");bc.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bd.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition"; refreshClipSources(); refreshClipJobs(); refreshRenders();}
   else{cl.classList.add("hidden");dl.classList.remove("hidden");bd.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bc.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition";}
 }
-async function loadHealth(){try{const r=await fetch(API+"/api/ytdlp/health");const j=await r.json();$("#healthText").textContent="yt-dlp "+(j.ytdlp_version||"ok")+" • clipper ready";}catch{$("#healthText").textContent="yt-dlp • clipper";}
-$("#pasteBtn").onclick=async()=>{try{const t=await navigator.clipboard.readText();if(t){urlInput.value=t.trim();urlInput.focus();}}catch{toast("Clipboard tidak tersedia",false);}};
+async function loadHealth(){
+  const dot=$("#healthDot"), txt=$("#healthText");
+  try{
+    const r=await fetch(API+"/api/ytdlp/health");const j=await r.json();
+    if(!r.ok) throw new Error(j.detail||"health fail");
+    txt.textContent="yt-dlp "+(j.ytdlp_version||"ok")+" • clipper ready";
+    dot.className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+  }catch(e){
+    txt.textContent="offline • "+(e.message||"error");
+    dot.className="w-2 h-2 rounded-full bg-red-500 animate-pulse";
+  }
+}
+$("#pasteBtn").onclick=async()=>{
+  try{
+    if(navigator.clipboard && window.isSecureContext){
+      const t=await navigator.clipboard.readText();if(t){urlInput.value=t.trim();urlInput.focus();hideError();return;}
+    }
+  }catch{}
+  // fallback for http (154.12.117.162:2393) where clipboard blocked
+  const v=prompt("Paste URL di sini:"); if(v){urlInput.value=v.trim();urlInput.focus();hideError();}
+};
 $("#clearBtn").onclick=()=>{urlInput.value="";urlInput.focus();hideError();};
-$$(".sampleBtn").forEach(b=>b.onclick=()=>{urlInput.value=b.dataset.sample;urlInput.focus();});
+$$(".sampleBtn").forEach(b=>b.onclick=()=>{urlInput.value=b.dataset.sample;urlInput.focus();hideError();});
 function showError(m){urlError.textContent=m;urlError.classList.remove("hidden");}
 function hideError(){urlError.classList.add("hidden");}
 urlInput.addEventListener("input", hideError);
 urlInput.addEventListener("keydown", e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();doDownload();}else if(e.key==="Enter"){e.preventDefault();doFetch();}});
 document.addEventListener("dragover",e=>e.preventDefault());
-document.addEventListener("drop",e=>{const t=e.dataTransfer.getData("text");if(t&&t.startsWith("http")){e.preventDefault();urlInput.value=t.trim();toast("URL ditempel dari drag & drop");}});
+document.addEventListener("drop",e=>{
+  const t=e.dataTransfer.getData("text/plain")||e.dataTransfer.getData("text")||e.dataTransfer.getData("text/uri-list");
+  if(t&&t.trim().startsWith("http")){e.preventDefault();urlInput.value=t.trim();hideError();toast("URL ditempel dari drag & drop");}
+});
+// settings sync
+function syncSettings(){
+  const ao=$("#audioOnly").checked, fmt=$("#format"), et=$("#embedThumb"), lab=$("#embedThumbLabel");
+  if(ao){
+    et.disabled=true; lab.classList.add("opacity-50","pointer-events-none");
+    if(["mp4","mkv","webm"].includes(fmt.value)) fmt.value="mp3";
+  } else {
+    et.disabled=false; lab.classList.remove("opacity-50","pointer-events-none");
+    if(["mp3","m4a","opus"].includes(fmt.value)) fmt.value="mp4";
+  }
+}
+$("#audioOnly").addEventListener("change", syncSettings);
+$("#format").addEventListener("change", ()=>{
+  const v=$("#format").value; if(["mp3","m4a","opus"].includes(v)) $("#audioOnly").checked=true; else if(v==="mp4") $("#audioOnly").checked=false; syncSettings();
+});
+$("#resetOpt").onclick=()=>{
+  $("#quality").value="720"; $("#format").value="mp4"; $("#playlist").value="no"; $("#limit").value=""; $("#audioOnly").checked=false; $("#withSubs").checked=false; $("#embedThumb").checked=false; $("#extraArgs").value=""; syncSettings(); toast("Pengaturan direset");
+};
+syncSettings();
+$("#logsToggle").onclick=()=>$("#logsBody").classList.toggle("hidden");
+$("#copyLogs").onclick=async()=>{
+  try{await navigator.clipboard.writeText(logs.textContent); toast("Log disalin");}
+  catch{const ta=document.createElement("textarea");ta.value=logs.textContent;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("Log disalin");}
+};
+$("#clipUrlInput").addEventListener("keydown", e=>{if(e.key==="Enter"){e.preventDefault();$("#clipUrlBtn").click();}});
 async function doFetch(){
   const url=urlInput.value.trim();
   if(!url)return showError("Tempel URL dulu");
@@ -219,74 +267,158 @@ async function doFetch(){
   try{const r=await fetch(API+"/api/ytdlp/info",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url,no_playlist:$("#playlist").value==="no"}), signal: ctrl.signal});clearTimeout(to);const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal ambil info");currentInfo=j.data;renderPreview(currentInfo);toast("Info berhasil dimuat");}
   catch(e){
     clearTimeout(to);
-    const msg = e.name==='AbortError' ? 'Timeout 30s — YouTube mungkin blokir IP server. Coba klik Download langsung tanpa Cek Info, atau pakai link TikTok/IG.' : (e.message||e);
-    $("#previewThumb").innerHTML='<div class="p-6 text-center text-sm text-red-400">'+msg+'<br><br><button onclick="doDownload()" class="mt-2 px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs">Coba Download langsung</button></div>';toast(msg,false);
+    const msg = e.name==='AbortError' ? 'Timeout 30s — YouTube mungkin blokir IP server. Coba klik Download langsung tanpa Cek Info, atau pakai link TikTok/IG.' : (e.message||String(e));
+    $("#previewThumb").innerHTML='<div class="p-6 text-center text-sm text-red-400">'+escapeHtml(msg)+'<br><br><button type="button" onclick="doDownload()" class="mt-2 px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs">Coba Download langsung</button></div>';toast(msg,false);
   }
   finally{clearTimeout(to);fetchBtn.disabled=false;fetchBtn.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg> Cek Info';$("#previewSkeleton").classList.add("hidden");}
 }
 function renderPreview(d){
   const thumb=d.thumbnail||(d.thumbnails&&d.thumbnails.length?d.thumbnails[d.thumbnails.length-1].url:"");
-  $("#previewThumb").innerHTML=thumb?`<img src="${thumb}" alt="" class="w-full h-full object-cover" loading="lazy"><div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent pointer-events-none"></div><span class="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-black/70 text-xs font-mono">${fmtDur(d.duration)}</span>`:'<div class="p-6 text-center text-zinc-500 text-sm">Tanpa thumbnail</div>';
+  $("#previewThumb").innerHTML=thumb?`<img src="${escapeHtml(thumb)}" alt="" class="w-full h-full object-cover" loading="lazy"><div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent pointer-events-none"></div><span class="absolute bottom-2 right-2 px-2 py-1 rounded-lg bg-black/70 text-xs font-mono">${escapeHtml(fmtDur(d.duration))}</span>`:'<div class="p-6 text-center text-zinc-500 text-sm">Tanpa thumbnail</div>';
   $("#previewTitle").textContent=d.title||"(tanpa judul)";$("#previewUploader").textContent=d.uploader||d.uploader_id||d.extractor||"—";$("#previewDuration").textContent=d.duration?fmtDur(d.duration):(d.duration_string||"—");$("#previewExtractor").textContent=d.extractor||d.extractor_key||"yt-dlp";$("#previewDesc").textContent=d.description||"Tidak ada deskripsi.";$("#previewViews").textContent=d.view_count?fmtViews(d.view_count):"—";$("#previewLikes").textContent=d.like_count?fmtViews(d.like_count):"—";$("#previewRes").textContent=d.height?d.width+"×"+d.height:(d.resolution||d.ext||"—");$("#fmtCount").textContent=d.formats_count||d.formats.length;
-  const list=$("#fmtList");list.innerHTML="";(d.formats||[]).slice(0,24).forEach(f=>{const row=document.createElement("div");row.className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs";row.innerHTML=`<span class="font-mono font-bold text-brand-400">${f.format_id||""}</span><span class="px-1.5 py-0.5 rounded bg-zinc-800">${f.ext||""}</span><span class="truncate flex-1">${f.resolution||f.format_note||""} ${f.vcodec!=="none"?f.vcodec:""} ${f.acodec!=="none"?f.acodec:""}</span><span class="text-zinc-500">${f.filesize?fmtBytes(f.filesize):(f.tbr?Math.round(f.tbr)+"k":"")}</span>`;list.appendChild(row);});
+  const list=$("#fmtList");list.innerHTML="";(d.formats||[]).slice(0,24).forEach(f=>{const row=document.createElement("div");row.className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs";row.innerHTML=`<span class="font-mono font-bold text-brand-400">${escapeHtml(f.format_id||"")}</span><span class="px-1.5 py-0.5 rounded bg-zinc-800">${escapeHtml(f.ext||"")}</span><span class="truncate flex-1">${escapeHtml((f.resolution||f.format_note||"")+" "+(f.vcodec!=="none"?f.vcodec:"")+" "+(f.acodec!=="none"?f.acodec:""))}</span><span class="text-zinc-500">${f.filesize?fmtBytes(f.filesize):(f.tbr?Math.round(f.tbr)+"k":"")}</span>`;list.appendChild(row);});
   $("#previewMeta").classList.remove("hidden");
 }
 async function doDownload(){
   const url=urlInput.value.trim();if(!url)return showError("Tempel URL dulu");if(!/^https?:\/\//.test(url))return showError("URL harus diawali http://");hideError();
   const payload={url,quality:$("#quality").value,format:$("#format").value,audio_only:$("#audioOnly").checked,no_playlist:$("#playlist").value==="no",with_subs:$("#withSubs").checked,embed_thumbnail:$("#embedThumb").checked,extra_args:$("#extraArgs").value.trim()+($("#limit").value?" --limit-rate "+$("#limit").value:"")};
   downloadBtn.disabled=true;downloadBtn.innerHTML='<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> Memulai...';
-  try{const r=await fetch(API+"/api/ytdlp/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal memulai download");toast("Download dimulai — lihat antrian");startPolling();}catch(e){toast(e.message,false);}finally{downloadBtn.disabled=false;downloadBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2"/></svg> Download';}
+  try{
+    const r=await fetch(API+"/api/ytdlp/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+    const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal memulai download");
+    toast("Download dimulai — lihat antrian");$("#logsBody").classList.remove("hidden");$("#logsLiveDot").classList.remove("hidden");
+    startPolling();
+  }catch(e){toast(e.message||String(e),false);}
+  finally{downloadBtn.disabled=false;downloadBtn.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 3v13"/><path d="M7 11l5 5 5-5"/><path d="M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2"/></svg> Download';}
 }
 fetchBtn.onclick=doFetch;downloadBtn.onclick=doDownload;
 function jobCard(j){
-  const pct=Math.round(j.progress||0);const isDone=j.status==="completed",isErr=j.status==="error";
+  const pct=Math.min(100,Math.max(0,Math.round(j.progress||0)));const isDone=j.status==="completed",isErr=j.status==="error";
+  const fname=escapeHtml(j.filename||j.url);const urlEsc=escapeHtml(j.url);const errEsc=j.error?escapeHtml(j.error).slice(0,400):"";
+  const dlHref=j.filename?`${API}/api/ytdlp/files/download?name=${encodeURIComponent(j.filename)}`:"";
   return `<div class="rounded-2xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-4">
     <div class="flex gap-3"><div class="w-10 h-10 rounded-xl ${isErr?"bg-red-900":isDone?"bg-emerald-900":"bg-zinc-800"} flex items-center justify-center shrink-0 text-sm">${isDone?"✓":isErr?"!":"⬇"}</div>
-      <div class="min-w-0 flex-1"><div class="flex items-start justify-between gap-2"><p class="text-sm font-semibold leading-tight truncate pr-2">${j.filename||j.url}</p><span class="shrink-0 text-[11px] px-2 py-1 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800 text-zinc-400"}">${j.status} ${pct}%</span></div>
-        <p class="text-xs text-zinc-500 truncate">${j.url}</p><div class="mt-3 h-2 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isErr?"bg-red-600":isDone?"bg-emerald-600":"bg-brand-600 progress-stripes"} transition-all" style="width:${pct}%"></div></div>
-        <div class="mt-1.5 flex items-center gap-3 text-[11px] font-mono text-zinc-500"><span>${j.speed||"—"}</span><span>ETA ${j.eta||"—"}</span><span class="ml-auto">${j.filesize||""}</span></div>
-        ${j.error?`<p class="mt-2 text-xs text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-2 py-1 break-all">${j.error}</p>`:""}
-        <div class="mt-2 flex flex-wrap gap-1.5">${j.filename&&isDone?`<a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(j.filename)}" class="px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold hover:bg-brand-700">Unduh</a><button onclick="clipFromJob('${j.job_id}')" class="px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-bold hover:bg-zinc-100">✂ Jadikan Clipper</button><button onclick="showLogs('${j.job_id}')" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Log</button>`:`<button onclick="showLogs('${j.job_id}')" class="mt-1 px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Lihat log</button>`}</div>
+      <div class="min-w-0 flex-1"><div class="flex items-start justify-between gap-2"><p class="text-sm font-semibold leading-tight truncate pr-2" title="${fname}">${fname}</p><span class="shrink-0 text-[11px] px-2 py-1 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800 text-zinc-400"}">${escapeHtml(j.status)} ${pct}%</span></div>
+        <p class="text-xs text-zinc-500 truncate" title="${urlEsc}">${urlEsc}</p><div class="mt-3 h-2 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isErr?"bg-red-600":isDone?"bg-emerald-600":"bg-brand-600 progress-stripes"} transition-all" style="width:${pct}%"></div></div>
+        <div class="mt-1.5 flex items-center gap-3 text-[11px] font-mono text-zinc-500"><span>${escapeHtml(j.speed||"—")}</span><span>ETA ${escapeHtml(j.eta||"—")}</span><span class="ml-auto">${escapeHtml(j.filesize||"")}</span></div>
+        ${j.error?`<p class="mt-2 text-xs text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-2 py-1 break-all">${errEsc}</p>`:""}
+        <div class="mt-2 flex flex-wrap gap-1.5">${j.filename&&isDone?`<a href="${dlHref}" class="px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold hover:bg-brand-700">Unduh</a><button type="button" data-clip-job="${j.job_id}" class="btn-clip-job px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-bold hover:bg-zinc-100">✂ Jadikan Clipper</button><button type="button" data-logs="${j.job_id}" class="btn-logs px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Log</button>`:`<button type="button" data-logs="${j.job_id}" class="btn-logs mt-1 px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Lihat log</button>`}</div>
       </div></div></div>`;
 }
-let jobsCache=[];
-async function refreshJobs(){try{const r=await fetch(API+"/api/ytdlp/jobs");const j=await r.json();jobsCache=j.jobs||[];$("#jobCount").textContent=jobsCache.length;const el=$("#jobsList");if(!jobsCache.length)el.innerHTML='<div class="py-10 text-center"><div class="w-14 h-14 mx-auto rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-xl mb-3">📥</div><p class="text-sm font-medium text-zinc-400">Belum ada download</p></div>';else el.innerHTML=jobsCache.map(jobCard).join("");if(jobsCache[0]&&jobsCache[0].logs_tail)logs.textContent=jobsCache[0].logs_tail.join("\n");}catch{}}
-async function showLogs(id){try{const r=await fetch(API+"/api/ytdlp/jobs/"+id);const j=await r.json();const job=j.job;logs.textContent=(job.logs||[]).join("\n")||"(log kosong)";document.getElementById("logsBody").classList.remove("hidden");logs.scrollTop=logs.scrollHeight;}catch{toast("Gagal ambil log",false);}}
-function startPolling(){refreshJobs();refreshFiles();refreshClipSources();if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(()=>{refreshJobs();refreshFiles();const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null;}},1500);}
+let prevJobsSig="";
+async function refreshJobs(){
+  const spinner=$("#jobsSpinner");
+  try{
+    spinner.classList.remove("hidden");
+    const r=await fetch(API+"/api/ytdlp/jobs");if(!r.ok) throw new Error("jobs "+r.status);
+    const j=await r.json();const newJobs=j.jobs||[];
+    const sig=newJobs.map(x=>x.job_id+":"+x.status+":"+Math.round(x.progress)).join("|");
+    const wasDownloading=jobsCache.some(x=>x.status==="downloading"||x.status==="queued");
+    const nowDownloading=newJobs.some(x=>x.status==="downloading"||x.status==="queued");
+    // toast on completion
+    newJobs.forEach(nj=>{
+      const oj=jobsCache.find(o=>o.job_id===nj.job_id);
+      if(oj && oj.status!=="completed" && nj.status==="completed"){toast("Selesai: "+(nj.filename||nj.job_id).slice(0,40));}
+      if(oj && oj.status!=="error" && nj.status==="error"){toast("Gagal: "+(nj.error||"").slice(0,80),false);}
+    });
+    jobsCache=newJobs;
+    $("#jobCount").textContent=jobsCache.length;
+    const el=$("#jobsList");
+    if(!jobsCache.length)el.innerHTML='<div class="py-10 text-center"><div class="w-14 h-14 mx-auto rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-xl mb-3">📥</div><p class="text-sm font-medium text-zinc-400">Belum ada download</p></div>';
+    else if(sig!==prevJobsSig){el.innerHTML=jobsCache.map(jobCard).join(""); prevJobsSig=sig;}
+    const hasRunning=jobsCache.some(x=>x.status==="downloading"||x.status==="queued");
+    const dot=$("#logsLiveDot");
+    if(hasRunning) dot.classList.remove("hidden"); else dot.classList.add("hidden");
+    if(jobsCache[0]&&jobsCache[0].logs_tail){
+      logs.textContent=jobsCache[0].logs_tail.join("\n");
+      if(hasRunning){document.getElementById("logsBody").classList.remove("hidden");logs.scrollTop=logs.scrollHeight;}
+    }
+    if(wasDownloading && !nowDownloading){await refreshFiles(); await refreshClipSources();}
+  }catch(e){console.error("refreshJobs",e);}
+  finally{spinner.classList.add("hidden");}
+}
+async function showLogs(id){try{const r=await fetch(API+"/api/ytdlp/jobs/"+id);if(!r.ok) throw new Error("404");const j=await r.json();const job=j.job;logs.textContent=(job.logs||[]).join("\n")||"(log kosong)";document.getElementById("logsBody").classList.remove("hidden");logs.scrollTop=logs.scrollHeight;}catch{toast("Gagal ambil log",false);}}
+function startPolling(){refreshJobs();refreshFiles();refreshClipSources();if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(async()=>{await refreshJobs();const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null; if(filesCache.length) await refreshFiles();}},1500);}
+// delegated clicks for jobs (avoid inline onclick breaking on ' " etc)
+document.getElementById("jobsList").addEventListener("click", e=>{
+  const a=e.target.closest(".btn-logs"); if(a){showLogs(a.dataset.logs); return;}
+  const b=e.target.closest(".btn-clip-job"); if(b){clipFromJob(b.dataset.clipJob); return;}
+});
 $("#refreshJobs").onclick=refreshJobs;
-$("#clearJobs").onclick=async()=>{const done=jobsCache.filter(j=>j.status==="completed"||j.status==="error").map(j=>j.job_id);for(const id of done){await fetch(API+"/api/ytdlp/jobs/"+id,{method:"DELETE"}).catch(()=>{});}refreshJobs();};
-async function refreshFiles(){try{const r=await fetch(API+"/api/ytdlp/files");const j=await r.json();const files=j.files||[];$("#fileCount").textContent=files.length;$("#storageCount").textContent=files.length;$("#storageDir").textContent=j.download_dir||"";const q=($("#fileSearch").value||"").toLowerCase();const filtered=q?files.filter(f=>f.name.toLowerCase().includes(q)):files;const grid=$("#filesGrid");if(!filtered.length)grid.innerHTML='<div class="col-span-full py-10 text-center text-zinc-500 text-sm">'+(files.length?'Tidak ada hasil':'Belum ada file — download video dulu')+'</div>';else grid.innerHTML=filtered.map(f=>{const isVid=/\.(mp4|mkv|webm|mov|avi)$/i.test(f.name),isAud=/\.(mp3|m4a|opus|wav|aac|flac)$/i.test(f.name);const icon=isVid?"🎬":isAud?"🎵":"📄";return `<div class="rounded-2xl bg-zinc-950 border border-zinc-800 p-3 flex gap-3"><div class="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg shrink-0">${icon}</div><div class="min-w-0 flex-1"><p class="text-sm font-semibold leading-tight truncate" title="${f.name}">${f.name}</p><p class="text-xs text-zinc-500">${f.size_human} • ${f.mtime_human} • .${f.ext}</p><div class="mt-2 flex gap-1.5 flex-wrap"><a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(f.name)}" class="px-3 py-1.5 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">Unduh</a><button onclick="deleteFile('${f.name.replace(/'/g,"\\'")}')" class="px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs hover:bg-zinc-800">Hapus</button>${isVid?`<button onclick="clipFromFile('${f.name.replace(/'/g,"\\'")}')" class="px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-bold hover:bg-zinc-100">✂ Clip</button>`:isAud?`<button onclick="clipFromFile('${f.name.replace(/'/g,"\\'")}')" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Clip</button>`:""}${isVid||isAud?`<button onclick="previewFile('${f.name.replace(/'/g,"\\'")}')" class="px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs hover:bg-zinc-800">Play</button>`:""}</div></div></div>`;}).join("");}catch{$("#filesGrid").innerHTML='<div class="col-span-full py-8 text-center text-red-400 text-sm">Gagal memuat file</div>';}}
-async function deleteFile(name){if(!confirm("Hapus file "+name+"?"))return;const r=await fetch(API+"/api/ytdlp/files/"+encodeURIComponent(name),{method:"DELETE"});if(r.ok){toast("File dihapus");refreshFiles();refreshClipSources();}else toast("Gagal hapus",false);}
-function previewFile(name){const url=API+"/api/ytdlp/files/download?name="+encodeURIComponent(name);const isVid=/\.(mp4|mkv|webm|mov)$/i.test(name);const w=window.open("", "_blank");w.document.write(isVid?`<video controls autoplay style="width:100%;max-height:100vh;background:#000" src="${url}"></video>`:`<audio controls autoplay style="width:100%;margin-top:40px" src="${url}"></audio><p style="font-family:sans-serif;text-align:center">${name}</p>`);}
-$("#refreshFiles").onclick=refreshFiles;$("#fileSearch").addEventListener("input",refreshFiles);$("#openFolder").onclick=()=>{document.querySelector("#filesGrid").scrollIntoView({behavior:"smooth"});};
+$("#clearJobs").onclick=async()=>{
+  const done=jobsCache.filter(j=>j.status==="completed"||j.status==="error");
+  if(!done.length) return toast("Tidak ada job selesai");
+  if(!confirm("Hapus "+done.length+" job selesai?")) return;
+  for(const j of done){await fetch(API+"/api/ytdlp/jobs/"+j.job_id,{method:"DELETE"}).catch(()=>{});}
+  prevJobsSig=""; await refreshJobs(); toast("Job dibersihkan");
+};
+function debounce(fn,ms){let t;return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);};}
+async function refreshFiles(){
+  try{
+    const r=await fetch(API+"/api/ytdlp/files");if(!r.ok) throw new Error("files "+r.status);
+    const j=await r.json();const files=j.files||[]; filesCache=files;
+    $("#fileCount").textContent=files.length;$("#storageCount").textContent=files.length;$("#storageDir").textContent=j.download_dir||"";
+    const q=($("#fileSearch").value||"").toLowerCase();
+    const filtered=q?files.filter(f=>f.name.toLowerCase().includes(q)):files;
+    const grid=$("#filesGrid");
+    if(!filtered.length)grid.innerHTML='<div class="col-span-full py-10 text-center text-zinc-500 text-sm">'+(files.length?'Tidak ada hasil untuk "'+escapeHtml(q)+'"':'Belum ada file — download video dulu')+'</div>';
+    else grid.innerHTML=filtered.map(f=>{
+      const nameEsc=escapeHtml(f.name);const isVid=/\.(mp4|mkv|webm|mov|avi)$/i.test(f.name),isAud=/\.(mp3|m4a|opus|wav|aac|flac)$/i.test(f.name);const icon=isVid?"🎬":isAud?"🎵":"📄";
+      return `<div class="rounded-2xl bg-zinc-950 border border-zinc-800 p-3 flex gap-3"><div class="w-12 h-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-lg shrink-0">${icon}</div><div class="min-w-0 flex-1"><p class="text-sm font-semibold leading-tight truncate" title="${nameEsc}">${nameEsc}</p><p class="text-xs text-zinc-500">${escapeHtml(f.size_human)} • ${escapeHtml(f.mtime_human)} • .${escapeHtml(f.ext)}</p><div class="mt-2 flex gap-1.5 flex-wrap"><a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(f.name)}" class="px-3 py-1.5 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">Unduh</a><button type="button" data-del="${encodeURIComponent(f.name)}" data-del-name="${nameEsc}" class="btn-del px-3 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs hover:bg-zinc-800">Hapus</button>${isVid?`<button type="button" data-clip="${encodeURIComponent(f.name)}" class="btn-clip px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-bold hover:bg-zinc-100">✂ Clip</button>`:isAud?`<button type="button" data-clip="${encodeURIComponent(f.name)}" class="btn-clip px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Clip</button>`:""}${isVid||isAud?`<button type="button" data-preview="${encodeURIComponent(f.name)}" class="btn-preview px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Preview</button>`:""}</div></div></div>`;
+    }).join("");
+  }catch(e){console.error("refreshFiles",e); $("#filesGrid").innerHTML='<div class="col-span-full py-6 text-center text-red-400 text-sm">Gagal memuat file</div>';}
+}
+document.getElementById("filesGrid").addEventListener("click", e=>{
+  const d=e.target.closest(".btn-del"); if(d){deleteFile(decodeURIComponent(d.dataset.del)); return;}
+  const c=e.target.closest(".btn-clip"); if(c){clipFromFile(decodeURIComponent(c.dataset.clip)); return;}
+  const p=e.target.closest(".btn-preview"); if(p){previewFile(decodeURIComponent(p.dataset.preview)); return;}
+});
+async function deleteFile(name){if(!confirm("Hapus file \""+name+"\"?"))return;try{const r=await fetch(API+"/api/ytdlp/files/"+encodeURIComponent(name),{method:"DELETE"});if(!r.ok){const j=await r.json().catch(()=>({detail:"gagal"})); throw new Error(j.detail||"gagal");}toast("File dihapus");await refreshFiles();await refreshClipSources();}catch(e){toast(e.message||String(e),false);}}
+function previewFile(name){
+  const url=API+"/api/ytdlp/files/download?name="+encodeURIComponent(name);
+  const isVid=/\.(mp4|mkv|webm|mov)$/i.test(name);
+  const w=window.open("", "_blank");
+  if(!w){toast("Popup diblokir, klik Unduh saja",false); return;}
+  const safeName=escapeHtml(name);
+  w.document.write(`<!doctype html><title>${safeName}</title><style>body{margin:0;background:#000;color:#fff;font-family:system-ui;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}video,audio{max-width:100%;max-height:90vh} p{padding:12px}</style>`+(isVid?`<video controls autoplay src="${url}"></video>`:`<audio controls autoplay src="${url}"></audio>`)+`<p>${safeName}</p><p><a href="${url}" download style="color:#ff2a2a">Download</a></p>`);
+}
+$("#refreshFiles").onclick=refreshFiles;$("#fileSearch").addEventListener("input", debounce(refreshFiles,300));$("#openFolder").onclick=()=>{document.querySelector("#filesGrid").scrollIntoView({behavior:"smooth"});};
 
 // CLIPPER tab
-async function refreshClipSources(){try{const r=await fetch(API+"/clip/sources");const j=await r.json();const files=j.files||[];$("#clipSourceCount").textContent=files.length;const el=$("#clipSourcesList");if(!files.length)el.innerHTML='<div class="py-10 text-center"><div class="w-14 h-14 mx-auto rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-xl mb-3">🎬</div><p class="text-sm font-medium text-zinc-400">Belum ada video dari ytdlp</p><p class="text-xs text-zinc-500 mt-1">Download dulu di tab ytdlp, lalu balik ke sini</p></div>';else el.innerHTML=files.map(f=>`<div class="rounded-xl bg-zinc-950 border border-zinc-800 p-3 flex gap-3"><div class="w-10 h-10 rounded-lg bg-brand-600 flex items-center justify-center shrink-0 text-white">▶</div><div class="min-w-0 flex-1"><p class="text-sm font-semibold truncate" title="${f.name}">${f.name}</p><p class="text-xs text-zinc-500">${f.size_human} • ${f.mtime_human}</p><div class="mt-2 flex gap-1.5"><button onclick="clipFromFile('${f.name.replace(/'/g,"\\'")}')" class="px-4 py-1.5 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">✂ Jadikan Clipper (DNA)</button><a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(f.name)}" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Unduh</a></div></div></div>`).join("");}catch(e){$("#clipSourcesList").innerHTML='<div class="py-6 text-center text-red-400 text-sm">Gagal memuat sumber</div>';}}
-async function clipFromFile(name){try{toast("Memulai DNA Engine untuk "+name+" ...");const r=await fetch(API+"/clip/from-download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:name})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("Clip job dibuat: "+j.job_id);startClipPolling(j.job_id);}catch(e){toast(e.message,false);}}
-async function clipFromJob(job_id){try{const r=await fetch(API+"/clip/from-ytdlp-job?job_id="+encodeURIComponent(job_id),{method:"POST"});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("Clip dari job "+job_id+" → "+j.job_id);switchTab('clip');startClipPolling(j.job_id);}catch(e){toast(e.message,false);}}
+async function refreshClipSources(){try{const r=await fetch(API+"/clip/sources");if(!r.ok) throw new Error("clip/sources "+r.status);const j=await r.json();const files=j.files||[];$("#clipSourceCount").textContent=files.length;const el=$("#clipSourcesList");if(!files.length)el.innerHTML='<div class="py-10 text-center"><div class="w-14 h-14 mx-auto rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-center text-xl mb-3">🎬</div><p class="text-sm font-medium text-zinc-400">Belum ada video dari ytdlp</p><p class="text-xs text-zinc-500 mt-1">Download dulu di tab ytdlp, lalu balik ke sini</p></div>';else el.innerHTML=files.map(f=>`<div class="rounded-xl bg-zinc-950 border border-zinc-800 p-3 flex gap-3"><div class="w-10 h-10 rounded-lg bg-brand-600 flex items-center justify-center shrink-0 text-white">▶</div><div class="min-w-0 flex-1"><p class="text-sm font-semibold truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</p><p class="text-xs text-zinc-500">${escapeHtml(f.size_human)} • ${escapeHtml(f.mtime_human)}</p><div class="mt-2 flex gap-1.5"><button type="button" data-clip="${encodeURIComponent(f.name)}" class="btn-clip-src px-4 py-1.5 rounded-full bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold">✂ Jadikan Clipper (DNA)</button><a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(f.name)}" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Unduh</a></div></div></div>`).join("");}catch(e){console.error(e);$("#clipSourcesList").innerHTML='<div class="py-6 text-center text-red-400 text-sm">Gagal memuat sumber</div>';}}
+document.getElementById("clipSourcesList").addEventListener("click", e=>{const b=e.target.closest(".btn-clip-src"); if(b) clipFromFile(decodeURIComponent(b.dataset.clip));});
+async function clipFromFile(name){try{toast("Memulai DNA Engine untuk "+name.slice(0,40)+" ...");const r=await fetch(API+"/clip/from-download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({filename:name})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("Clip job dibuat: "+j.job_id);startClipPolling(j.job_id);}catch(e){toast(e.message||String(e),false);}}
+async function clipFromJob(job_id){try{const r=await fetch(API+"/clip/from-ytdlp-job?job_id="+encodeURIComponent(job_id),{method:"POST"});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("Clip dari job "+job_id+" → "+j.job_id);switchTab('clip');startClipPolling(j.job_id);}catch(e){toast(e.message||String(e),false);}}
 $("#clipUrlBtn").onclick=async()=>{
   const url=$("#clipUrlInput").value.trim();if(!url)return toast("Isi URL dulu",false);if(!/^https?:\/\//.test(url))return toast("URL harus http",false);
   $("#clipUrlBtn").disabled=true;$("#clipUrlBtn").textContent="⏳ Memulai...";
-  try{const r=await fetch(API+"/clip/from-url",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url, quality:"best", format:"mp4"})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("One-click ytdlp+Clip dimulai: "+j.job_id);startClipPolling(j.job_id);}catch(e){toast(e.message,false);}finally{$("#clipUrlBtn").disabled=false;$("#clipUrlBtn").textContent="⚡ Clip dari URL";}
+  try{const r=await fetch(API+"/clip/from-url",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url, quality:"best", format:"mp4"})});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal");toast("One-click ytdlp+Clip dimulai: "+j.job_id);startClipPolling(j.job_id);}catch(e){toast(e.message||String(e),false);}finally{$("#clipUrlBtn").disabled=false;$("#clipUrlBtn").textContent="⚡ Clip dari URL";}
 };
 let activeClipJobs=new Set();
 function startClipPolling(jobId){if(jobId)activeClipJobs.add(jobId);refreshClipJobs();refreshRenders();if(clipPollTimer)clearInterval(clipPollTimer);clipPollTimer=setInterval(()=>{refreshClipJobs();refreshRenders();},2000);}
 async function refreshClipJobs(){
-  // poll active jobs via /jobs/{id}
   const list=$("#clipJobsList");
-  if(activeClipJobs.size===0){try{const r=await fetch(API+"/clip/renders");const j=await r.json();const renders=j.renders||[];if(renders.length){const jobsMap={};renders.forEach(r=>{if(!jobsMap[r.job_id])jobsMap[r.job_id]={job_id:r.job_id, count:0};jobsMap[r.job_id].count++;});const html=Object.values(jobsMap).slice(0,6).map(j=>`<div class="rounded-xl bg-zinc-950 border border-emerald-900 p-3"><div class="flex justify-between items-center"><span class="text-xs font-mono">${j.job_id.slice(0,8)}</span><span class="text-xs px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-200">SUCCESS ${j.count} clip</span></div><a href="#renders" onclick="document.getElementById('rendersGrid').scrollIntoView({behavior:'smooth'})" class="text-xs text-brand-400 underline">Lihat hasil</a></div>`).join("");list.innerHTML=html||'<div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div>';$("#clipJobCount").textContent=Object.keys(jobsMap).length;return;}}catch{} list.innerHTML='<div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div>';return;}
-  const jobs=[];for(const id of activeClipJobs){try{const r=await fetch(API+"/jobs/"+id);const j=await r.json();jobs.push(j);}catch{}}
+  if(activeClipJobs.size===0){try{const r=await fetch(API+"/clip/renders");if(!r.ok) throw new Error(r.status);const j=await r.json();const renders=j.renders||[];if(renders.length){const jobsMap={};renders.forEach(r=>{if(!jobsMap[r.job_id])jobsMap[r.job_id]={job_id:r.job_id, count:0};jobsMap[r.job_id].count++;});const html=Object.values(jobsMap).slice(0,6).map(j=>`<div class="rounded-xl bg-zinc-950 border border-emerald-900 p-3"><div class="flex justify-between items-center"><span class="text-xs font-mono">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-xs px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-200">SUCCESS ${j.count} clip</span></div><a href="#renders" onclick="document.getElementById('rendersGrid').scrollIntoView({behavior:'smooth'})" class="text-xs text-brand-400 underline">Lihat hasil</a></div>`).join("");list.innerHTML=html||'<div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div>';$("#clipJobCount").textContent=Object.keys(jobsMap).length;return;}}catch(e){console.error(e);} list.innerHTML='<div class="py-6 text-center text-zinc-500 text-sm">Belum ada job clip</div>';return;}
+  const jobs=[];for(const id of activeClipJobs){try{const r=await fetch(API+"/jobs/"+id);if(!r.ok) throw new Error(r.status);const j=await r.json();jobs.push(j);}catch{}}
   $("#clipJobCount").textContent=jobs.length;
   if(!jobs.length){list.innerHTML='<div class="py-6 text-center text-zinc-500 text-sm">Menunggu...</div>';return;}
-  list.innerHTML=jobs.map(j=>{const st=j.status;const pct=j.progress||0;const isDone=st==="SUCCESS",isErr=st==="FAILURE";return `<div class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${j.job_id.slice(0,8)}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${Math.round(pct*100)}%</span></div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct*100}%"></div></div>${j.error?`<p class="mt-1 text-xs text-red-400 break-all">${j.error}</p>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=f.split('/').pop();return `<a href="${API}/renders/${j.job_id}/${name}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}</div>`;}).join("");
+  list.innerHTML=jobs.map(j=>{const st=escapeHtml(j.status);const pct=Math.min(100,Math.round((j.progress||0)*100));const isDone=st==="SUCCESS",isErr=st==="FAILURE";return `<div class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${pct}%</span></div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct}%"></div></div>${j.error?`<p class="mt-1 text-xs text-red-400 break-all">${escapeHtml(String(j.error)).slice(0,300)}</p>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=escapeHtml(f.split('/').pop());return `<a href="${API}/renders/${encodeURIComponent(j.job_id)}/${encodeURIComponent(name)}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}</div>`;}).join("");
 }
-async function refreshRenders(){try{const r=await fetch(API+"/clip/renders");const j=await r.json();const renders=j.renders||[];$("#renderCount").textContent=renders.length;const grid=$("#rendersGrid");if(!renders.length)grid.innerHTML='<div class="col-span-full py-8 text-center text-zinc-500 text-sm">Belum ada hasil clip — jalankan clip dulu</div>';else grid.innerHTML=renders.slice(0,12).map(f=>`<div class="rounded-2xl bg-zinc-950 border border-zinc-800 overflow-hidden"><div class="aspect-[9/16] max-h-[280px] bg-black flex items-center justify-center relative"><video src="${f.url}" class="w-full h-full object-cover" muted preload="metadata"></video><span class="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/70 text-[11px] font-mono">${f.job_id.slice(0,6)}</span></div><div class="p-3"><p class="text-xs font-semibold truncate" title="${f.filename}">${f.filename}</p><p class="text-[11px] text-zinc-500">${f.size_human}</p><div class="mt-2 flex gap-1.5"><a href="${f.url}" download class="flex-1 text-center px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold">⬇ Unduh</a><a href="${f.url}" target="_blank" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Play</a></div></div></div>`).join("");}catch{}}
+async function refreshRenders(){try{const r=await fetch(API+"/clip/renders");if(!r.ok) throw new Error(r.status);const j=await r.json();const renders=j.renders||[];$("#renderCount").textContent=renders.length;const grid=$("#rendersGrid");if(!renders.length)grid.innerHTML='<div class="col-span-full py-8 text-center text-zinc-500 text-sm">Belum ada hasil clip — jalankan clip dulu</div>';else grid.innerHTML=renders.slice(0,12).map(f=>`<div class="rounded-2xl bg-zinc-950 border border-zinc-800 overflow-hidden"><div class="aspect-[9/16] max-h-[280px] bg-black flex items-center justify-center relative"><video src="${escapeHtml(f.url)}" class="w-full h-full object-cover" muted preload="metadata"></video><span class="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/70 text-[11px] font-mono">${escapeHtml(f.job_id.slice(0,6))}</span></div><div class="p-3"><p class="text-xs font-semibold truncate" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</p><p class="text-[11px] text-zinc-500">${escapeHtml(f.size_human)}</p><div class="mt-2 flex gap-1.5"><a href="${escapeHtml(f.url)}" download class="flex-1 text-center px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold">⬇ Unduh</a><a href="${escapeHtml(f.url)}" target="_blank" class="px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Play</a></div></div></div>`).join("");}catch(e){console.error(e);}}
 $("#refreshClipSources").onclick=refreshClipSources;$("#refreshClipJobs").onclick=refreshClipJobs;$("#refreshRenders").onclick=refreshRenders;
 $("#uploadClipBtn").onclick=async()=>{
   const inp=$("#uploadInput");if(!inp.files||!inp.files[0])return toast("Pilih file dulu",false);
-  const fd=new FormData();fd.append("file",inp.files[0]);$("#uploadStatus").textContent="Mengupload & clipping...";$("#uploadClipBtn").disabled=true;
-  try{const r=await fetch(API+"/clip",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal upload");$("#uploadStatus").textContent="Job: "+j.job_id+" ("+j.status+")";toast("Upload clip dimulai: "+j.job_id);activeClipJobs.add(j.job_id);startClipPolling();}catch(e){$("#uploadStatus").textContent="Error: "+e.message;toast(e.message,false);}finally{$("#uploadClipBtn").disabled=false;}
+  const file=inp.files[0]; if(file.size>500*1024*1024) return toast("File terlalu besar >500MB",false);
+  const fd=new FormData();fd.append("file",file);$("#uploadStatus").textContent="Mengupload & clipping...";$("#uploadClipBtn").disabled=true;
+  try{const r=await fetch(API+"/clip",{method:"POST",body:fd});const j=await r.json();if(!r.ok)throw new Error(j.detail||"Gagal upload");$("#uploadStatus").textContent="Job: "+j.job_id+" ("+j.status+")";toast("Upload clip dimulai: "+j.job_id);activeClipJobs.add(j.job_id);startClipPolling(); inp.value="";}catch(e){$("#uploadStatus").textContent="Error: "+(e.message||String(e));toast(e.message||String(e),false);}finally{$("#uploadClipBtn").disabled=false;}
 };
+// visibility: pause polling when hidden to save VPS
+let bgPoll=null;
+document.addEventListener("visibilitychange", ()=>{
+  if(document.hidden){ if(pollTimer) clearInterval(pollTimer); if(bgPoll) clearInterval(bgPoll);}
+  else { refreshJobs(); if(jobsCache.some(j=>j.status==="downloading")) startPolling(); bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading")) refreshJobs();},1500);}
+});
+bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) refreshJobs();},1500);
 loadHealth();refreshJobs();refreshFiles();
 setInterval(loadHealth,30000);
 </script>
