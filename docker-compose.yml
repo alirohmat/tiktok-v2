@@ -64,10 +64,26 @@ services:
   # Full stack Clipper dengan Redis+CELERY untuk antrian paralel (podcast panjang 40+ chunk)
   # Jalankan: docker compose --profile full up -d
   api:
-    extends:
-      service: ytdlp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tiktok-v2:latest
     container_name: tiktok-api
     restart: unless-stopped
+    ports:
+      - "${APP_PORT_FULL:-8001}:8000"
+    env_file:
+      - .env
+    environment:
+      - STORAGE_DIR=/app/storage
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ./storage:/app/storage
+      - ytdlp_downloads:/app/storage/downloads
     depends_on:
       redis:
         condition: service_healthy
@@ -76,6 +92,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+      start_period: 20s
+    networks:
+      - app_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     profiles:
       - full
 
