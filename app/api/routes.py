@@ -191,25 +191,158 @@ def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> 
     return CLIP_JOBS[job_id]
 
 
+def _disk_info() -> dict:
+    import shutil as _sh
+
+    info: dict = {}
+    try:
+        s = get_settings()
+        for label, p in [("storage", s.storage_path), ("root", Path("/"))]:
+            try:
+                du = _sh.disk_usage(str(p))
+                total = du.total
+                free = du.free
+                used = total - free
+                pct = round(used / total * 100, 1) if total else 0
+                info[label] = {"total_gb": round(total / 1024**3, 2), "used_gb": round(used / 1024**3, 2), "free_gb": round(free / 1024**3, 2), "used_pct": pct, "path": str(p)}
+            except Exception as e:
+                info[label] = {"error": str(e)[:200]}
+        # per-dir sizes
+        try:
+            from app.services.ytdlp_service import _dir_stats
+
+            s = get_settings()
+            base = s.storage_path
+            per_dir: dict = {}
+            for dname in ["downloads", "renders", "uploads", "cache", "previews"]:
+                try:
+                    st = _dir_stats(base / dname)
+                    per_dir[dname] = st
+                except Exception as e:
+                    per_dir[dname] = {"error": str(e)[:200]}
+            info["per_dir"] = per_dir
+        except Exception:
+            pass
+    except Exception as e:
+        info["error"] = str(e)[:300]
+    return info
+
+
+def _keys_info() -> dict:
+    s = get_settings()
+    def _mask(v: str) -> str:
+        if not v or v in ("your_muse_spark_key",):
+            return "missing"
+        if len(v) <= 8:
+            return v[:2] + "***"
+        return v[:4] + "***" + v[-4:]
+    out = {}
+    out["groq_api_key"] = {"present": bool(s.groq_api_key), "masked": _mask(s.groq_api_key), "model": s.groq_whisper_model}
+    out["muse_api_key"] = {"present": bool(s.muse_api_key and s.muse_api_key != "your_muse_spark_key"), "masked": _mask(s.muse_api_key), "model": s.muse_model, "base_url": s.muse_base_url}
+    out["coverr_api_key"] = {"present": bool(s.coverr_api_key), "masked": _mask(s.coverr_api_key)}
+    # auto-editor binary
+    try:
+        import shutil as _sh2
+        ae = _sh2.which("auto-editor")
+        out["auto_editor"] = {"available": bool(ae), "path": ae or "not found"}
+        if ae:
+            try:
+                r = subprocess.run([ae, "--help"], capture_output=True, timeout=3, text=True)
+                out["auto_editor"]["help_ok"] = r.returncode == 0
+            except Exception as e:
+                out["auto_editor"]["help_ok"] = False
+                out["auto_editor"]["help_error"] = str(e)[:200]
+    except Exception as e:
+        out["auto_editor"] = {"error": str(e)[:200]}
+    return out
+
+
 @router.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict:
     settings = get_settings()
     # Check ffmpeg
+    ffmpeg = "unknown"
+    ffmpeg_ver = ""
     try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        r = subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, text=True, timeout=3)
         ffmpeg = "ok"
+        ffmpeg_ver = (r.stdout or "").splitlines()[0][:120] if r.stdout else ""
     except Exception as e:
         ffmpeg = f"error: {e}"
-    # Check redis (optional)
+    # Check ffprobe
+    ffprobe = "unknown"
+    try:
+        subprocess.run(["ffprobe", "-version"], capture_output=True, check=True, timeout=3)
+        ffprobe = "ok"
+    except Exception as e:
+        ffprobe = f"error: {e}"
+    # Check redis
+    redis_status = "unknown"
     try:
         import redis  # type: ignore[import-untyped]
 
-        r = redis.from_url(settings.redis_url, socket_connect_timeout=2)
-        r.ping()
+        rr = redis.from_url(settings.redis_url, socket_connect_timeout=2)
+        rr.ping()
         redis_status = "pong"
     except Exception as e:
         redis_status = f"unavailable: {e}"
-    return {"status": "ok", "ffmpeg": ffmpeg, "redis": redis_status}
+        redis_status = redis_status[:300]
+    # disk quick
+    disk = _disk_info()
+    keys = _keys_info()
+    # overall status
+    status = "ok"
+    # disk full >95% => degraded
+    try:
+        if disk.get("root", {}).get("used_pct", 0) > 95:
+            status = "degraded"
+        if disk.get("storage", {}).get("used_pct", 0) > 95:
+            status = "degraded"
+    except Exception:
+        pass
+    if "error" in ffmpeg or "error" in redis_status:
+        # keep ok but flag
+        pass
+    return {"status": status, "ffmpeg": ffmpeg, "ffmpeg_version": ffmpeg_ver, "ffprobe": ffprobe, "redis": redis_status, "disk": disk, "keys": keys}
+
+
+@router.get("/clip/diagnostics")
+def clip_diagnostics() -> dict:
+    """Detail diagnostics untuk UI — disk per-dir, quota, job counts, errors last."""
+    settings = get_settings()
+    disk = _disk_info()
+    keys = _keys_info()
+    # quota
+    quota_err = None
+    try:
+        from app.services.ytdlp_service import _check_storage_quotas
+
+        quota_err = _check_storage_quotas()
+    except Exception as e:
+        quota_err = str(e)[:500]
+    # job counts
+    jobs_info = {"in_memory": len(CLIP_JOBS), "by_status": {}}
+    try:
+        from collections import Counter
+
+        c = Counter(js.status for js in CLIP_JOBS.values())
+        jobs_info["by_status"] = dict(c)
+        # last 3 failures with error snippet
+        fails = [(jid, js.error or js.phase, (js.logs[-1] if js.logs else "")[:300]) for jid, js in CLIP_JOBS.items() if js.status == "FAILURE"]
+        fails = sorted(fails, key=lambda x: x[0])[-3:]
+        jobs_info["recent_failures"] = [{"job_id": jid, "error": err, "last_log": log} for jid, err, log in fails]
+    except Exception as e:
+        jobs_info["error"] = str(e)[:300]
+    # storage stats quick
+    storage_stats = None
+    try:
+        from app.services.ytdlp_service import _dir_stats
+
+        base = settings.storage_path
+        storage_stats = {d: _dir_stats(base / d) for d in ["downloads", "renders", "uploads", "cache", "previews"]}
+    except Exception as e:
+        storage_stats = {"error": str(e)[:300]}
+    return {"ok": True, "disk": disk, "keys": keys, "quota_error": quota_err, "jobs": jobs_info, "storage_stats": storage_stats}
 
 
 @router.post("/clip", response_model=JobStatus)

@@ -48,6 +48,18 @@
     <span class="ml-auto hidden sm:flex items-center gap-2 text-xs text-zinc-500"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Sumber utama: ytdlp • Panel: Docker ready</span>
   </div>
 </header>
+<!-- Diagnostics bar — disk full, keys, quota, failures -->
+<div id="diagnosticsBar" class="hidden max-w-[1320px] mx-auto px-4 sm:px-6 mt-4">
+  <div id="diagnosticsInner" class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+    <div class="flex items-center justify-between gap-2">
+      <h3 class="font-bold text-xs tracking-widest uppercase text-zinc-400 flex items-center gap-2">🩺 Diagnostics <span id="diagStatus" class="px-2 py-0.5 rounded-full bg-zinc-800 text-[11px] normal-case tracking-normal">loading</span></h3>
+      <div class="flex gap-1.5"><button type="button" id="diagRefresh" class="px-3 py-1 rounded-full bg-zinc-800 text-xs hover:bg-zinc-700">Refresh</button><button type="button" id="diagCopy" class="px-3 py-1 rounded-full bg-zinc-800 text-xs">Copy JSON</button></div>
+    </div>
+    <div id="diagGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-3 text-xs"></div>
+    <div id="diagActions" class="mt-3 hidden rounded-xl bg-amber-950/30 border border-amber-900 p-3 text-xs leading-relaxed"></div>
+    <details class="mt-3"><summary class="text-xs text-zinc-500 cursor-pointer">Raw JSON</summary><pre id="diagRaw" class="mt-2 max-h-[260px] overflow-auto p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-[11px] font-mono whitespace-pre-wrap break-all"></pre></details>
+  </div>
+</div>
 
 <main class="max-w-[1320px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
   <!-- TAB DOWNLOAD -->
@@ -306,14 +318,73 @@ function updateManageSelCount(){
 async function loadHealth(){
   const dot=$("#healthDot"), txt=$("#healthText");
   try{
-    const r=await fetch(API+"/api/ytdlp/health");const j=await r.json();
-    if(!r.ok) throw new Error(j.detail||"health fail");
-    txt.textContent="yt-dlp "+(j.ytdlp_version||"ok")+" • clipper ready";
-    dot.className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+    // primary new /health (disk+keys+ffmpeg), fallback to old ytdlp health
+    let r=await fetch(API+"/health"); let j=null;
+    if(r.ok) j=await r.json();
+    else { r=await fetch(API+"/api/ytdlp/health"); j=await r.json(); if(!r.ok) throw new Error(j.detail||"health fail"); j={ffmpeg: j.ytdlp_version? "ok": "ok", redis: "pong", _legacy:j}; }
+    const ff = j.ffmpeg||"ok", rr=j.redis||"?";
+    const diskPct = j.disk?.root?.used_pct ?? j.disk?.storage?.used_pct ?? 0;
+    const groqOk = j.keys?.groq_api_key?.present, museOk=j.keys?.muse_api_key?.present;
+    let label = `clipper ${ff==="ok"?"✓":"✗"} • redis ${String(rr).slice(0,12)}`;
+    if(diskPct>90) label += ` • disk ${diskPct}% ⚠`;
+    if(!groqOk) label += ` • GROQ ✗`;
+    if(!museOk) label += ` • Muse ✗`;
+    txt.textContent = label;
+    txt.title = JSON.stringify(j,null,2).slice(0,800);
+    const degraded = String(ff).includes("error") || String(rr).includes("unavailable") || diskPct>95 || !groqOk || !museOk;
+    dot.className = degraded ? "w-2 h-2 rounded-full bg-amber-500 animate-pulse" : "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+    // also refresh diagnostics bar quietly
+    if(j.disk || j.keys) { try{ renderDiagnosticsFromHealth(j);}catch{} }
   }catch(e){
     txt.textContent="offline • "+(e.message||"error");
+    txt.title = e.stack||e.message||String(e);
     dot.className="w-2 h-2 rounded-full bg-red-500 animate-pulse";
   }
+}
+let _lastDiagnostics=null;
+function renderDiagnosticsFromHealth(h){
+  _lastDiagnostics = h;
+  const bar=$("#diagnosticsBar"), grid=$("#diagGrid"), raw=$("#diagRaw"), st=$("#diagStatus"), act=$("#diagActions");
+  if(!bar||!grid) return;
+  bar.classList.remove("hidden");
+  const disk = h.disk||{}, keys=h.keys||{};
+  const root = disk.root||{}, stor=disk.storage||{}, per= disk.per_dir||{};
+  const ff = h.ffmpeg||"?", ffp=h.ffprobe||"?", rr=h.redis||"?";
+  const cards = [];
+  cards.push(`<div class="rounded-xl bg-zinc-950 border ${String(ff).includes("error")?"border-red-900":"border-zinc-800"} p-3"><div class="font-bold">FFmpeg</div><div class="font-mono break-all">${escapeHtml(String(ff).slice(0,120))}</div><div class="text-[11px] text-zinc-500">${escapeHtml(h.ffmpeg_version||"")}</div><div class="mt-1">ffprobe: ${escapeHtml(String(ffp).slice(0,60))}</div></div>`);
+  cards.push(`<div class="rounded-xl bg-zinc-950 border ${String(rr).includes("unavailable")?"border-red-900":"border-zinc-800"} p-3"><div class="font-bold">Redis</div><div class="font-mono break-all">${escapeHtml(String(rr).slice(0,200))}</div><div class="text-[11px] text-zinc-500">${!String(rr).includes("unavailable")?"antri paralel aktif":"lean eager (tanpa antri)"}</div></div>`);
+  const diskColor = (root.used_pct>95||stor.used_pct>95)?"border-red-900 bg-red-950/20":"border-zinc-800";
+  cards.push(`<div class="rounded-xl bg-zinc-950 border ${diskColor} p-3"><div class="font-bold">Disk</div><div>root ${root.used_pct??"?"}% • ${root.free_gb??"?"} GB free / ${root.total_gb??"?"} GB</div><div>storage ${stor.used_pct??"?"}% • ${stor.free_gb??"?"} GB free</div><div class="mt-1 text-[11px] font-mono">${Object.entries(per).map(([k,v])=>`${k}:${v.files??"?"}f ${v.human||""}`).join(" • ").slice(0,200)}</div></div>`);
+  const groq = keys.groq_api_key||{}, muse=keys.muse_api_key||{}, cov=keys.coverr_api_key||{}, ae=keys.auto_editor||{};
+  cards.push(`<div class="rounded-xl bg-zinc-950 border ${(!groq.present||!muse.present)?"border-amber-900":"border-zinc-800"} p-3"><div class="font-bold">Keys</div><div>GROQ ${groq.present?"✓":"✗"} ${escapeHtml(groq.masked||"")} • ${escapeHtml(groq.model||"")}</div><div>Muse ${muse.present?"✓":"✗"} ${escapeHtml(muse.masked||"")} • ${escapeHtml(muse.model||"")}</div><div>Coverr ${cov.present?"✓":"✗"} • auto-editor ${ae.available?"✓ "+escapeHtml(ae.path||""):"✗ "+escapeHtml(ae.path||"not found")}${ae.help_ok===false?" (help fail)":""}</div></div>`);
+  grid.innerHTML=cards.join("");
+  const degraded = String(ff).includes("error") || String(rr).includes("unavailable") || (root.used_pct>95) || (stor.used_pct>95) || !groq.present || !muse.present;
+  st.textContent = h.status==="degraded"||degraded ? "degraded" : "ok";
+  st.className = degraded ? "px-2 py-0.5 rounded-full bg-amber-900 text-amber-200 text-[11px]" : "px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-200 text-[11px]";
+  // actions
+  const actions=[];
+  if(root.used_pct>90||stor.used_pct>90) actions.push(`Disk hampir penuh (${root.used_pct||stor.used_pct}%) — di VPS: <code class="px-1 bg-zinc-800 rounded">docker system prune -af --volumes; docker buildx prune --all -f; rm -rf storage/renders/* storage/cache/*</code> lalu <code>docker compose build && docker compose up -d</code>`);
+  if(!groq.present) actions.push(`GROQ_API_KEY kosong — whisper gagal. Set di <code>.env</code> lalu restart.`);
+  if(!muse.present) actions.push(`MUSE_API_KEY kosong — clip jatuh ke mock 55-90s. Set GROQ+Muse untuk hasil nyata.`);
+  if(String(ff).includes("error")) actions.push(`FFmpeg error — cek Dockerfile: <code>apt-get install ffmpeg</code>.`);
+  if(String(rr).includes("unavailable") && !String(rr).includes("pong")) actions.push(`Redis unavailable — mode lean (eager, tanpa antri paralel). Untuk antri: <code>docker compose --profile full up -d</code>`);
+  if(!ae.available) actions.push(`auto-editor binary tidak ada — build Docker harus jalan. Di VPS: <code>curl -L .../auto-editor-linux -o /usr/local/bin/auto-editor && chmod +x /usr/local/bin/auto-editor</code> (Dockerfile sudah).`);
+  if(actions.length){ act.classList.remove("hidden"); act.innerHTML = `Perbaikan cepat:<ul class="list-disc ml-4 mt-1">${actions.map(a=>`<li>${a}</li>`).join("")}</ul>`; } else { act.classList.add("hidden"); act.innerHTML=""; }
+  if(raw) raw.textContent = JSON.stringify(h,null,2);
+}
+async function loadDiagnostics(){
+  try{
+    const r=await fetch(API+"/clip/diagnostics"); if(!r.ok) throw new Error(r.status);
+    const j=await r.json();
+    // merge with health style for render
+    const h = {status: "ok", ffmpeg: "ok", ffprobe:"ok", redis: j.jobs ? `${j.jobs.in_memory} jobs` : "?", disk: j.disk, keys: j.keys, quota_error: j.quota_error, jobs_diag: j.jobs, storage_stats: j.storage_stats};
+    // also fetch /health for ffmpeg/redis truth
+    try{ const rh=await fetch(API+"/health"); if(rh.ok){ const hh=await rh.json(); h.ffmpeg=hh.ffmpeg; h.ffmpeg_version=hh.ffmpeg_version; h.ffprobe=hh.ffprobe; h.redis=hh.redis; h.status=hh.status; } }catch{}
+    renderDiagnosticsFromHealth(h);
+    // quota banner
+    if(j.quota_error){ const act=$("#diagActions"); if(act){ act.classList.remove("hidden"); act.innerHTML += `<div class="mt-2 p-2 rounded bg-red-950 border border-red-900">Quota: ${escapeHtml(String(j.quota_error).slice(0,600))}</div>`; } }
+    if(j.jobs?.recent_failures?.length){ const act=$("#diagActions"); if(act){ act.classList.remove("hidden"); act.innerHTML += `<div class="mt-2"><b>Recent failures:</b> ${j.jobs.recent_failures.map(f=>`<div class="font-mono text-[11px]">${escapeHtml(f.job_id.slice(0,8))}: ${escapeHtml(String(f.error).slice(0,200))} — ${escapeHtml(String(f.last_log).slice(0,200))}</div>`).join("")}</div>`; } }
+  }catch(e){ console.error("diagnostics",e); const g=$("#diagGrid"); if(g) g.innerHTML = `<div class="col-span-full p-3 rounded bg-red-950 border border-red-900">Gagal load diagnostics: ${escapeHtml(e.message||String(e))}</div>`; }
 }
 $("#pasteBtn").onclick=async()=>{
   try{
@@ -398,14 +469,14 @@ async function doDownload(){
 fetchBtn.onclick=doFetch;downloadBtn.onclick=doDownload;
 function jobCard(j){
   const pct=Math.min(100,Math.max(0,Math.round(j.progress||0)));const isDone=j.status==="completed",isErr=j.status==="error";
-  const fname=escapeHtml(j.filename||j.url);const urlEsc=escapeHtml(j.url);const errEsc=j.error?escapeHtml(j.error).slice(0,400):"";
+  const fname=escapeHtml(j.filename||j.url);const urlEsc=escapeHtml(j.url);const errRaw=j.error||"";const errEsc=escapeHtml(errRaw).slice(0,600);
   const dlHref=j.filename?`${API}/api/ytdlp/files/download?name=${encodeURIComponent(j.filename)}`:"";
   return `<div class="rounded-2xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-4">
     <div class="flex gap-3"><div class="w-10 h-10 rounded-xl ${isErr?"bg-red-900":isDone?"bg-emerald-900":"bg-zinc-800"} flex items-center justify-center shrink-0 text-sm">${isDone?"✓":isErr?"!":"⬇"}</div>
       <div class="min-w-0 flex-1"><div class="flex items-start justify-between gap-2"><p class="text-sm font-semibold leading-tight truncate pr-2" title="${fname}">${fname}</p><span class="shrink-0 text-[11px] px-2 py-1 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800 text-zinc-400"}">${escapeHtml(j.status)} ${pct}%</span></div>
         <p class="text-xs text-zinc-500 truncate" title="${urlEsc}">${urlEsc}</p><div class="mt-3 h-2 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isErr?"bg-red-600":isDone?"bg-emerald-600":"bg-brand-600 progress-stripes"} transition-all" style="width:${pct}%"></div></div>
         <div class="mt-1.5 flex items-center gap-3 text-[11px] font-mono text-zinc-500"><span>${escapeHtml(j.speed||"—")}</span><span>ETA ${escapeHtml(j.eta||"—")}</span><span class="ml-auto">${escapeHtml(j.filesize||"")}</span></div>
-        ${j.error?`<p class="mt-2 text-xs text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-2 py-1 break-all">${errEsc}</p>`:""}
+        ${errRaw?`<div class="mt-2 text-xs text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-2 py-2 break-all"><div class="font-bold flex items-center justify-between">Error <button type="button" class="btn-copy-err ml-2 px-2 py-0.5 rounded bg-zinc-800 text-[11px] text-zinc-200" data-copy-error="${escapeHtml(errRaw).replace(/"/g,'&quot;')}">Copy</button></div><div class="mt-1 whitespace-pre-wrap">${errEsc}</div></div>`:""}
         <div class="mt-2 flex flex-wrap gap-1.5">${j.filename&&isDone?`<a href="${dlHref}" class="px-3 py-1.5 rounded-full bg-brand-600 text-white text-xs font-bold hover:bg-brand-700">Unduh</a><button type="button" data-clip-job="${j.job_id}" class="btn-clip-job px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-bold hover:bg-zinc-100">✂ Jadikan Clipper</button><button type="button" data-logs="${j.job_id}" class="btn-logs px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Log</button>`:`<button type="button" data-logs="${j.job_id}" class="btn-logs mt-1 px-3 py-1.5 rounded-full bg-zinc-800 text-xs">Lihat log</button>`}</div>
       </div></div></div>`;
 }
@@ -567,7 +638,7 @@ async function refreshClipJobs(){
   const jobs=[];for(const id of activeClipJobs){try{const r=await fetch(API+"/jobs/"+id);if(!r.ok) throw new Error(r.status);const j=await r.json();jobs.push(j);}catch{}}
   $("#clipJobCount").textContent=jobs.length;
   if(!jobs.length){list.innerHTML='<div class="py-6 text-center text-zinc-500 text-sm">Menunggu...</div>';return;}
-  list.innerHTML=jobs.map(j=>{const st=escapeHtml(j.status);const pct=Math.min(100,Math.round((j.progress||0)*100));const isDone=st==="SUCCESS",isErr=st==="FAILURE";return `<div data-clip-log="${j.job_id}" class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3 cursor-pointer hover:border-zinc-700"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${pct}%</span></div><div class="text-[11px] text-zinc-500 font-mono mt-1">${escapeHtml(j.phase||"")}</div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct}%"></div></div>${j.error?`<p class="mt-1 text-xs text-red-400 break-all">${escapeHtml(String(j.error)).slice(0,300)}</p>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=escapeHtml(f.split('/').pop());return `<a href="${API}/renders/${encodeURIComponent(j.job_id)}/${encodeURIComponent(name)}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}<div class="mt-2 flex gap-1"><button type="button" data-clear-clip="${j.job_id}" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700">Hapus dari daftar</button><button type="button" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800">Lihat log →</button></div></div>`;}).join("");
+  list.innerHTML=jobs.map(j=>{const st=escapeHtml(j.status);const pct=Math.min(100,Math.round((j.progress||0)*100));const isDone=st==="SUCCESS",isErr=st==="FAILURE";const errRaw=j.error||"";return `<div data-clip-log="${j.job_id}" class="rounded-xl border ${isErr?"border-red-900 bg-red-950/20":isDone?"border-emerald-900 bg-emerald-950/10":"border-zinc-800 bg-zinc-950"} p-3 cursor-pointer hover:border-zinc-700"><div class="flex justify-between items-center"><span class="text-xs font-mono font-bold">${escapeHtml(j.job_id.slice(0,8))}</span><span class="text-[11px] px-2 py-0.5 rounded-full ${isDone?"bg-emerald-900 text-emerald-200":isErr?"bg-red-900 text-red-200":"bg-zinc-800"}">${st} ${pct}%</span></div><div class="text-[11px] text-zinc-500 font-mono mt-1">${escapeHtml(j.phase||"")}</div><div class="mt-2 h-1.5 rounded-full bg-zinc-800 overflow-hidden"><div class="h-full ${isDone?"bg-emerald-600":isErr?"bg-red-600":"bg-brand-600 progress-stripes"}" style="width:${pct}%"></div></div>${errRaw?`<div class="mt-2 text-xs text-red-400 bg-red-950/30 border border-red-900 rounded-lg px-2 py-2 break-all"><div class="flex items-center justify-between"><span class="font-bold">Error</span><button type="button" class="btn-copy-err px-2 py-0.5 rounded bg-zinc-800 text-[11px] text-zinc-200" data-copy-error="${escapeHtml(String(errRaw)).replace(/"/g,'&quot;')}">Copy</button></div><div class="mt-1 whitespace-pre-wrap">${escapeHtml(String(errRaw)).slice(0,600)}</div></div>`:""}${j.result?`<div class="mt-2 flex flex-wrap gap-1">${j.result.map(f=>{const name=escapeHtml(f.split('/').pop());return `<a href="${API}/renders/${encodeURIComponent(j.job_id)}/${encodeURIComponent(name)}" class="text-xs px-2 py-1 rounded-full bg-brand-600 text-white">▶ ${name}</a>`;}).join("")}</div>`:""}<div class="mt-2 flex gap-1"><button type="button" data-clear-clip="${j.job_id}" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800 hover:bg-zinc-700">Hapus dari daftar</button><button type="button" class="text-[11px] px-2 py-1 rounded-full bg-zinc-800">Lihat log →</button></div></div>`;}).join("");
 }
 // copy helper + job-meta cache for SEO/engagement
 const _jobMetaCache={};
@@ -684,10 +755,19 @@ $("#manageOlderBtn").onclick=async()=>{
   try{ const r=await fetch(API+"/clip/bulk-delete",{method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({older_than_days: days, target:"all"})}); const j=await r.json(); if(!r.ok) throw new Error(j.detail||"gagal"); toast(`Hapus lama >${days}h: ${j.deleted_count} file`); await refreshManage(); await refreshFiles(); await refreshRenders(); }catch(err){ toast(err.message||String(err),false); }
 };
 
-loadHealth();refreshJobs();refreshFiles();
+loadHealth();loadDiagnostics();refreshJobs();refreshFiles();
+// wiring diagnostics
+document.getElementById("diagRefresh")?.addEventListener("click", ()=>{loadHealth();loadDiagnostics();toast("Diagnostics refreshed");});
+document.getElementById("diagCopy")?.addEventListener("click", async()=>{
+  try{const t=JSON.stringify(_lastDiagnostics,null,2)||document.getElementById("diagRaw")?.textContent||""; if(navigator.clipboard) await navigator.clipboard.writeText(t); else {const ta=document.createElement("textarea");ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();} toast("Diagnostics disalin");}
+  catch(e){ toast("Copy gagal: "+(e.message||e),false); }
+});
+document.addEventListener("click", e=>{
+  const b=e.target.closest(".btn-copy-err"); if(b){ const v=b.getAttribute("data-copy-error")||b.dataset.copyError||""; if(navigator.clipboard) navigator.clipboard.writeText(v).then(()=>toast("Error disalin")).catch(()=>toast("Copy gagal",false)); else {const ta=document.createElement("textarea");ta.value=v;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("Error disalin");} }
+});
 // restore clip polling after refresh (fix hilang saat refresh)
 if(activeClipJobs.size>0){ startClipPolling(); }
-setInterval(loadHealth,30000);
+setInterval(()=>{loadHealth();loadDiagnostics();},30000);
 </script>
 </body>
 </html>
