@@ -487,3 +487,173 @@ def get_render(job_id: str, filename: str) -> FileResponse:
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, media_type="video/mp4", filename=filename)
+
+
+@router.delete("/renders/{job_id}/{filename}")
+def delete_render(job_id: str, filename: str):
+    """Hapus 1 file hasil clip (9:16). Dipakai menu Kelola File di frontend."""
+    import shutil
+
+    _validate_job_id(job_id)
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    if not _FILENAME_RE.match(filename):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    settings = get_settings()
+    base = settings.storage_path / "renders" / job_id
+    path = base / filename
+    _resolve_within_storage(path, settings.storage_path / "renders")
+    try:
+        if path.resolve().parent != base.resolve():
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Path tidak valid")
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="File tidak ditemukan")
+    try:
+        path.unlink()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    # hapus folder job jika kosong
+    try:
+        if base.exists() and not any(base.iterdir()):
+            base.rmdir()
+            CLIP_JOBS.pop(job_id, None)
+            CLIP_LOGS.pop(job_id, None)
+    except Exception:
+        pass
+    return {"ok": True, "deleted": f"{job_id}/{filename}"}
+
+
+@router.delete("/clip/renders/{job_id}")
+def delete_render_job(job_id: str):
+    """Hapus semua hasil clip untuk 1 job_id (folder)."""
+    import shutil
+
+    _validate_job_id(job_id)
+    settings = get_settings()
+    base = settings.storage_path / "renders" / job_id
+    _resolve_within_storage(base, settings.storage_path / "renders")
+    if not base.exists() or not base.is_dir():
+        raise HTTPException(status_code=404, detail="Job render tidak ditemukan")
+    try:
+        shutil.rmtree(base)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    CLIP_JOBS.pop(job_id, None)
+    CLIP_LOGS.pop(job_id, None)
+    return {"ok": True, "deleted": job_id}
+
+
+class BulkDeleteRequest(BaseModel):
+    job_ids: list[str] | None = None
+    filenames: list[str] | None = None  # untuk downloads: ["a.mp4","b.mp4"]
+    older_than_days: int | None = None
+    target: str = Field(default="renders", description="renders|downloads|all")
+
+
+@router.post("/clip/bulk-delete")
+def bulk_delete(body: BulkDeleteRequest):
+    """Hapus massal — dipakai Kelola File: hapus terpilih / hapus lama > N hari."""
+    import shutil as _shutil
+    import time as _t2
+
+    settings = get_settings()
+    deleted: list[str] = []
+    errors: list[str] = []
+
+    # 1) Hapus renders per job_ids
+    if body.job_ids:
+        for jid in body.job_ids:
+            try:
+                _validate_job_id(jid)
+                base = settings.storage_path / "renders" / jid
+                _resolve_within_storage(base, settings.storage_path / "renders")
+                if base.exists():
+                    _shutil.rmtree(base)
+                    deleted.append(f"renders/{jid}")
+                    CLIP_JOBS.pop(jid, None)
+                    CLIP_LOGS.pop(jid, None)
+            except Exception as e:
+                errors.append(f"{jid}: {e}")
+
+    # 2) Hapus downloads per filenames
+    if body.filenames:
+        from app.services.ytdlp_service import get_download_dir
+
+        dl = get_download_dir()
+        for name in body.filenames:
+            try:
+                if "/" in name or "\\" in name or ".." in name:
+                    raise ValueError("nama tidak valid")
+                p = dl / name
+                if not _is_within(p, dl):
+                    raise ValueError("traversal")
+                if p.resolve().parent != dl.resolve():
+                    raise ValueError("traversal")
+                if p.exists() and p.is_file():
+                    p.unlink()
+                    deleted.append(f"downloads/{name}")
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+
+    # 3) Hapus older_than_days
+    if body.older_than_days is not None and body.older_than_days >= 0:
+        cutoff = _t2.time() - body.older_than_days * 86400
+        targets: list[Path] = []
+        if body.target in ("renders", "all"):
+            targets.append(settings.storage_path / "renders")
+        if body.target in ("downloads", "all"):
+            from app.services.ytdlp_service import get_download_dir
+
+            targets.append(get_download_dir())
+        if body.target in ("uploads", "all"):
+            targets.append(settings.storage_path / "uploads")
+        for base in targets:
+            if not base.exists():
+                continue
+            try:
+                for p in base.rglob("*"):
+                    if p.is_file() and p.stat().st_mtime < cutoff:
+                        try:
+                            # pastikan masih di dalam storage
+                            _resolve_within_storage(p, settings.storage_path)
+                            p.unlink()
+                            deleted.append(str(p.relative_to(settings.storage_path)))
+                        except Exception as e:
+                            errors.append(f"{p.name}: {e}")
+                # bersihkan folder kosong renders
+                if base.name == "renders":
+                    for d in list(base.iterdir()):
+                        try:
+                            if d.is_dir() and not any(d.iterdir()):
+                                d.rmdir()
+                                CLIP_JOBS.pop(d.name, None)
+                                CLIP_LOGS.pop(d.name, None)
+                        except Exception:
+                            pass
+            except Exception as e:
+                errors.append(str(e))
+
+    return {"ok": True, "deleted": deleted, "deleted_count": len(deleted), "errors": errors}
+
+
+@router.get("/clip/storage-stats")
+def storage_stats():
+    """Statistik storage untuk Kelola File."""
+    from app.services.ytdlp_service import _dir_stats
+
+    settings = get_settings()
+    base = settings.storage_path
+    out: dict = {}
+    total_files = 0
+    total_bytes = 0
+    for sub in ["downloads", "renders", "uploads", "cache", "previews"]:
+        c, b = _dir_stats(base / sub)
+        out[sub] = {"files": c, "bytes": b, "human": f"{b/1024/1024:.2f} MB" if b else "0 MB"}
+        total_files += c
+        total_bytes += b
+    out["total"] = {"files": total_files, "bytes": total_bytes, "human": f"{total_bytes/1024/1024:.2f} MB"}
+    return {"ok": True, "stats": out, "storage_path": str(base)}

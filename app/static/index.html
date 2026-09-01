@@ -44,6 +44,7 @@
   <div class="max-w-[1320px] mx-auto px-4 sm:px-6 pb-3 flex gap-2">
     <button type="button" id="tabBtnDl" onclick="switchTab('dl')" class="tab-active px-5 py-2 rounded-full border text-sm font-bold transition">⬇ ytdlp Download</button>
     <button type="button" id="tabBtnClip" onclick="switchTab('clip')" class="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition">✂ DNA Clipper</button>
+    <button type="button" id="tabBtnManage" onclick="switchTab('manage')" class="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition">🗑 Kelola File</button>
     <span class="ml-auto hidden sm:flex items-center gap-2 text-xs text-zinc-500"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Sumber utama: ytdlp • Panel: Docker ready</span>
   </div>
 </header>
@@ -182,6 +183,39 @@ Contoh: [14:22:10] Queued: video.mp4
     </div>
   </div>
 
+  <!-- TAB MANAGE — Kelola File -->
+  <div id="tab-manage" class="hidden">
+    <div class="card rounded-[20px] bg-zinc-900 border border-zinc-800 p-4 sm:p-5">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <h2 class="font-bold text-sm flex items-center gap-2"><span class="w-7 h-7 rounded-lg bg-red-900 flex items-center justify-center">🗑</span> Kelola File — Download ORI & Hasil Clip</h2>
+        <button type="button" id="refreshManage" class="px-3 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs hover:bg-zinc-800">↻ Refresh</button>
+      </div>
+      <div id="manageStats" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-5">
+        <div class="col-span-full py-4 text-center text-zinc-500 text-xs">Memuat statistik...</div>
+      </div>
+      <div class="flex flex-wrap gap-2 mb-4 text-xs">
+        <button type="button" id="manageDeleteSelected" class="px-4 py-2 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold disabled:opacity-40" disabled>Hapus Terpilih (<span id="manageSelCount">0</span>)</button>
+        <button type="button" id="manageSelectAll" class="px-3 py-2 rounded-full bg-zinc-800 hover:bg-zinc-700">Pilih semua</button>
+        <button type="button" id="manageClearSel" class="px-3 py-2 rounded-full bg-zinc-950 border border-zinc-800">Batal pilih</button>
+        <span class="ml-auto flex items-center gap-2">
+          <select id="manageOlder" class="px-2 py-1.5 rounded-full bg-zinc-950 border border-zinc-800 text-xs"><option value="">Hapus file lama &gt;</option><option value="1">> 1 hari</option><option value="3">> 3 hari</option><option value="7">> 7 hari</option><option value="30">> 30 hari</option></select>
+          <button type="button" id="manageOlderBtn" class="px-3 py-1.5 rounded-full bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs">Hapus</button>
+        </span>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-2 flex items-center gap-2">📥 Video ORI — storage/downloads <span id="manageDlCount" class="px-1.5 py-0.5 rounded bg-zinc-800 text-xs normal-case tracking-normal">0</span></h3>
+          <div id="manageDlList" class="space-y-1.5 max-h-[520px] overflow-auto pr-1 border border-zinc-800 rounded-xl p-2 bg-zinc-950"><div class="py-6 text-center text-zinc-500 text-sm">Memuat...</div></div>
+        </div>
+        <div>
+          <h3 class="font-bold text-xs tracking-widest uppercase text-zinc-500 mb-2 flex items-center gap-2">✨ Hasil Clip 9:16 — storage/renders <span id="manageRenderCount" class="px-1.5 py-0.5 rounded bg-zinc-800 text-xs normal-case tracking-normal">0</span></h3>
+          <div id="manageRenderList" class="space-y-1.5 max-h-[520px] overflow-auto pr-1 border border-zinc-800 rounded-xl p-2 bg-zinc-950"><div class="py-6 text-center text-zinc-500 text-sm">Memuat...</div></div>
+        </div>
+      </div>
+      <p class="text-[11px] text-zinc-500 mt-3">Centang file/job lalu Hapus Terpilih. File ORI dihapus via <code class="px-1 py-0.5 rounded bg-zinc-800">DELETE /api/ytdlp/files/{name}</code>, hasil clip via <code class="px-1 py-0.5 rounded bg-zinc-800">DELETE /renders/{job_id}/{file}</code> atau <code class="px-1 py-0.5 rounded bg-zinc-800">POST /clip/bulk-delete</code>.</p>
+    </div>
+  </div>
+
   <p class="text-center text-[11px] text-zinc-600 mt-8">Digital DNA Engine v2 • Sumber utama ytdlp • Docker stabil • <a href="/docs" class="text-zinc-400 underline">API Docs</a> • Hormati hak cipta</p>
 </main>
 
@@ -203,10 +237,71 @@ function fmtBytes(n){if(n==null)return "—";if(n<1024)return n+" B";if(n<1024*1
 function fmtViews(n){if(!n)return "—";if(n>1e6)return (n/1e6).toFixed(1)+"M";if(n>1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
 function fmtDur(s){if(!s&&s!==0)return "—";const m=Math.floor(s/60),sec=Math.floor(s%60);return m+":"+String(sec).padStart(2,"0");}
 function stopAllPolling(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} if(clipPollTimer){clearInterval(clipPollTimer);clipPollTimer=null;} }
+let manageSelDl=new Set(), manageSelRenders=new Set(); // filenames & job_id/filename
 function switchTab(which){
-  const dl=$("#tab-dl"), cl=$("#tab-clip"), bd=$("#tabBtnDl"), bc=$("#tabBtnClip");
-  if(which==='clip'){dl.classList.add("hidden");cl.classList.remove("hidden");bc.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bd.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition"; refreshClipSources(); refreshClipJobs(); refreshRenders();}
-  else{cl.classList.add("hidden");dl.classList.remove("hidden");bd.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bc.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition"; stopAllPolling(); if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) startPolling(); }
+  const dl=$("#tab-dl"), cl=$("#tab-clip"), mg=$("#tab-manage"), bd=$("#tabBtnDl"), bc=$("#tabBtnClip"), bm=$("#tabBtnManage");
+  const tabActive="tab-active px-5 py-2 rounded-full border text-sm font-bold transition", tabIdle="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition";
+  dl.classList.toggle("hidden", which!=='dl'); cl.classList.toggle("hidden", which!=='clip'); mg.classList.toggle("hidden", which!=='manage');
+  bd.className=which==='dl'?tabActive:tabIdle; bc.className=which==='clip'?tabActive:tabIdle; bm.className=which==='manage'?tabActive:tabIdle;
+  if(which==='clip'){ refreshClipSources(); refreshClipJobs(); refreshRenders(); }
+  else if(which==='manage'){ refreshManage(); }
+  else { stopAllPolling(); if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) startPolling(); }
+}
+async function refreshManage(){ await Promise.all([refreshManageStats(), refreshManageLists()]); }
+async function refreshManageStats(){
+  try{
+    const r=await fetch(API+"/clip/storage-stats"); if(!r.ok) throw new Error(r.status);
+    const j=await r.json(); const s=j.stats||{}; const order=["downloads","renders","uploads","cache","previews","total"];
+    const labels={downloads:"ORI downloads", renders:"Hasil clip", uploads:"uploads", cache:"cache", previews:"previews", total:"TOTAL"};
+    const icons={downloads:"📥", renders:"✨", uploads:"📤", cache:"🗃", previews:"👁", total:"💾"};
+    $("#manageStats").innerHTML=order.map(k=>{
+      const v=s[k]||{files:0,human:"0 MB"}; const isTotal=k==="total";
+      return `<div class="rounded-xl ${isTotal?"bg-brand-950 border-brand-800":"bg-zinc-950 border-zinc-800"} border p-3 text-center"><div class="text-lg">${icons[k]}</div><div class="text-[10px] tracking-widest uppercase text-zinc-500">${labels[k]}</div><div class="text-sm font-bold">${v.files} file</div><div class="text-xs font-mono text-zinc-400">${v.human}</div></div>`;
+    }).join("");
+  }catch(e){ $("#manageStats").innerHTML='<div class="col-span-full py-3 text-center text-red-400 text-xs">'+escapeHtml(e.message||String(e))+'</div>'; }
+}
+async function refreshManageLists(){
+  // downloads
+  try{
+    const r=await fetch(API+"/api/ytdlp/files"); const j=await r.json(); const files=j.files||[];
+    $("#manageDlCount").textContent=files.length;
+    const el=$("#manageDlList");
+    if(!files.length) el.innerHTML='<div class="py-10 text-center text-zinc-500 text-sm">Belum ada file ORI</div>';
+    else el.innerHTML=files.map(f=>{
+      const name=escapeHtml(f.name); const short=name.length>38?name.slice(0,35)+"…":name;
+      const checked=manageSelDl.has(f.name)?"checked":"";
+      return `<label class="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-zinc-900 border border-transparent hover:border-zinc-800 cursor-pointer text-xs"><input type="checkbox" data-manage-dl="${encodeURIComponent(f.name)}" ${checked} class="accent-red-600"><span class="flex-1 min-w-0"><span class="font-semibold truncate block" title="${name}">${short}</span><span class="text-[11px] text-zinc-500 font-mono">${escapeHtml(f.size_human||"")} • ${escapeHtml(f.mtime_human||"")}</span></span><a href="${API}/api/ytdlp/files/download?name=${encodeURIComponent(f.name)}" class="shrink-0 px-2 py-1 rounded-full bg-zinc-800 text-[11px]">Unduh</a><button type="button" data-manage-del-dl="${encodeURIComponent(f.name)}" class="shrink-0 px-2 py-1 rounded-full bg-red-900 text-white text-[11px]">Hapus</button></label>`;
+    }).join("");
+  }catch(e){ $("#manageDlList").innerHTML='<div class="py-6 text-center text-red-400 text-xs">'+escapeHtml(e.message||String(e))+'</div>'; }
+  // renders
+  try{
+    const r=await fetch(API+"/clip/renders"); const j=await r.json(); const renders=j.renders||[];
+    // group by job_id
+    const byJob={}; renders.forEach(x=>{ if(!byJob[x.job_id]) byJob[x.job_id]=[]; byJob[x.job_id].push(x); });
+    const jobCount=Object.keys(byJob).length;
+    $("#manageRenderCount").textContent=renders.length + (jobCount?` (${jobCount} job)`:"");
+    const el=$("#manageRenderList");
+    if(!renders.length) el.innerHTML='<div class="py-10 text-center text-zinc-500 text-sm">Belum ada hasil clip</div>';
+    else {
+      let html="";
+      for(const [jobId, arr] of Object.entries(byJob)){
+        const jobChecked=arr.every(x=> manageSelRenders.has(jobId+"/"+x.filename));
+        html+=`<div class="rounded-xl bg-zinc-900 border border-zinc-800 p-2 mb-2"><label class="flex items-center gap-2 text-xs font-bold cursor-pointer"><input type="checkbox" data-manage-job="${jobId}" ${jobChecked?"checked":""} class="accent-red-600"> Job <span class="font-mono">${escapeHtml(jobId.slice(0,8))}</span> <span class="font-normal text-zinc-500">(${arr.length} file)</span><button type="button" data-manage-del-job="${jobId}" class="ml-auto px-2 py-1 rounded-full bg-red-900 text-white text-[11px]">Hapus job</button></label><div class="mt-2 space-y-1">`;
+        for(const f of arr){
+          const key=jobId+"/"+f.filename; const checked=manageSelRenders.has(key)?"checked":"";
+          html+=`<label class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-zinc-950 border border-zinc-800 cursor-pointer text-xs"><input type="checkbox" data-manage-render="${encodeURIComponent(key)}" ${checked} class="accent-red-600"><span class="flex-1 truncate font-mono text-[11px]" title="${escapeHtml(f.filename)}">${escapeHtml(f.filename)}</span><span class="text-[11px] text-zinc-500">${escapeHtml(f.size_human||"")}</span><a href="${escapeHtml(f.url)}" target="_blank" class="shrink-0 px-2 py-1 rounded-full bg-zinc-800 text-[11px]">Play</a><button type="button" data-manage-del-render="${encodeURIComponent(key)}" class="shrink-0 px-2 py-1 rounded-full bg-red-900 text-white text-[11px]">Hapus</button></label>`;
+        }
+        html+=`</div></div>`;
+      }
+      el.innerHTML=html;
+    }
+  }catch(e){ $("#manageRenderList").innerHTML='<div class="py-6 text-center text-red-400 text-xs">'+escapeHtml(e.message||String(e))+'</div>'; }
+  updateManageSelCount();
+}
+function updateManageSelCount(){
+  const n=manageSelDl.size + manageSelRenders.size;
+  $("#manageSelCount").textContent=n;
+  $("#manageDeleteSelected").disabled=n===0;
 }
 async function loadHealth(){
   const dot=$("#healthDot"), txt=$("#healthText");
@@ -504,6 +599,83 @@ document.addEventListener("visibilitychange", ()=>{
   else { refreshJobs(); if(jobsCache.some(j=>j.status==="downloading")) startPolling(); bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) refreshJobs();},1500);}
 });
 bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) refreshJobs();},1500);
+// === KELOLA FILE handlers ===
+$("#refreshManage").onclick=refreshManage;
+$("#manageSelectAll").onclick=()=>{
+  // pilih semua visible
+  document.querySelectorAll("#manageDlList [data-manage-dl]").forEach(el=> manageSelDl.add(decodeURIComponent(el.dataset.manageDl)));
+  document.querySelectorAll("#manageRenderList [data-manage-render]").forEach(el=> manageSelRenders.add(decodeURIComponent(el.dataset.manageRender)));
+  // juga select all job jika ada
+  refreshManageLists();
+};
+$("#manageClearSel").onclick=()=>{ manageSelDl.clear(); manageSelRenders.clear(); refreshManageLists(); };
+document.getElementById("manageDlList").addEventListener("change", e=>{
+  const cb=e.target.closest("[data-manage-dl]"); if(!cb) return;
+  const name=decodeURIComponent(cb.dataset.manageDl);
+  if(cb.checked) manageSelDl.add(name); else manageSelDl.delete(name);
+  updateManageSelCount();
+});
+document.getElementById("manageDlList").addEventListener("click", async e=>{
+  const btn=e.target.closest("[data-manage-del-dl]"); if(!btn) return;
+  const name=decodeURIComponent(btn.dataset.manageDelDl);
+  if(!confirm('Hapus ORI "'+name+'"?')) return;
+  try{ const r=await fetch(API+"/api/ytdlp/files/"+encodeURIComponent(name),{method:"DELETE"}); const j=await r.json(); if(!r.ok) throw new Error(j.detail||"gagal"); toast("ORI dihapus: "+name); manageSelDl.delete(name); await refreshManage(); await refreshFiles(); await refreshClipSources(); }catch(err){ toast(err.message||String(err),false); }
+});
+document.getElementById("manageRenderList").addEventListener("change", e=>{
+  const a=e.target.closest("[data-manage-render]"); if(a){
+    const key=decodeURIComponent(a.dataset.manageRender);
+    if(a.checked) manageSelRenders.add(key); else manageSelRenders.delete(key);
+    updateManageSelCount(); return;
+  }
+  const b=e.target.closest("[data-manage-job]"); if(b){
+    const jobId=b.dataset.manageJob;
+    const jobKeys=[...document.querySelectorAll(`[data-manage-render]`)]
+      .map(el=>decodeURIComponent(el.dataset.manageRender))
+      .filter(k=>k.startsWith(jobId+"/"));
+    if(b.checked) jobKeys.forEach(k=>manageSelRenders.add(k)); else jobKeys.forEach(k=>manageSelRenders.delete(k));
+    refreshManageLists();
+  }
+});
+document.getElementById("manageRenderList").addEventListener("click", async e=>{
+  const a=e.target.closest("[data-manage-del-render]"); if(a){
+    const key=decodeURIComponent(a.dataset.manageDelRender); const [jobId, ...rest]=key.split("/"); const fn=rest.join("/");
+    if(!confirm('Hapus clip "'+fn+'"?')) return;
+    try{ const r=await fetch(API+"/renders/"+encodeURIComponent(jobId)+"/"+encodeURIComponent(fn),{method:"DELETE"}); const j=await r.json(); if(!r.ok) throw new Error(j.detail||"gagal"); toast("Clip dihapus"); manageSelRenders.delete(key); await refreshManage(); await refreshRenders(); }catch(err){ toast(err.message||String(err),false);} return;
+  }
+  const b=e.target.closest("[data-manage-del-job]"); if(b){
+    const jobId=b.dataset.manageDelJob;
+    if(!confirm('Hapus semua clip job '+jobId.slice(0,8)+'?')) return;
+    try{ const r=await fetch(API+"/clip/renders/"+encodeURIComponent(jobId),{method:"DELETE"}); const j=await r.json(); if(!r.ok) throw new Error(j.detail||"gagal"); toast("Job dihapus: "+jobId.slice(0,8)); // hapus semua key job ini
+      [...manageSelRenders].forEach(k=>{ if(k.startsWith(jobId+"/")) manageSelRenders.delete(k); });
+      await refreshManage(); await refreshRenders(); await refreshClipJobs();
+    }catch(err){ toast(err.message||String(err),false); }
+  }
+});
+$("#manageDeleteSelected").onclick=async()=>{
+  const n=manageSelDl.size+manageSelRenders.size; if(!n) return;
+  if(!confirm('Hapus '+n+' file terpilih?')) return;
+  const jobIds=[...new Set([...manageSelRenders].map(k=>k.split("/")[0]))];
+  // bedakan: jika user centang semua file dalam job, bulk job delete lebih efisien, tapi kita hapus per file via bulk-delete agar selektif
+  // strategi: pakai POST /clip/bulk-delete untuk renders per file? endpoint itu hapus job utuh per job_ids, jadi untuk selektif pakai DELETE per file
+  let ok=0, fail=0;
+  for(const name of [...manageSelDl]){
+    try{ const r=await fetch(API+"/api/ytdlp/files/"+encodeURIComponent(name),{method:"DELETE"}); if(r.ok) ok++; else fail++; }catch{ fail++; }
+  }
+  for(const key of [...manageSelRenders]){
+    const [jobId, ...rest]=key.split("/"); const fn=rest.join("/");
+    try{ const r=await fetch(API+"/renders/"+encodeURIComponent(jobId)+"/"+encodeURIComponent(fn),{method:"DELETE"}); if(r.ok) ok++; else fail++; }catch{ fail++; }
+  }
+  manageSelDl.clear(); manageSelRenders.clear();
+  toast(`Hapus selesai: ${ok} ok${fail?`, ${fail} gagal`:""}` , fail===0);
+  await refreshManage(); await refreshFiles(); await refreshClipSources(); await refreshRenders(); await refreshClipJobs();
+};
+$("#manageOlderBtn").onclick=async()=>{
+  const v=$("#manageOlder").value; if(!v) return toast("Pilih durasi dulu", false);
+  const days=parseInt(v,10);
+  if(!confirm(`Hapus semua file ${v} hari+ di ORI + clip + uploads?`)) return;
+  try{ const r=await fetch(API+"/clip/bulk-delete",{method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({older_than_days: days, target:"all"})}); const j=await r.json(); if(!r.ok) throw new Error(j.detail||"gagal"); toast(`Hapus lama >${days}h: ${j.deleted_count} file`); await refreshManage(); await refreshFiles(); await refreshRenders(); }catch(err){ toast(err.message||String(err),false); }
+};
+
 loadHealth();refreshJobs();refreshFiles();
 // restore clip polling after refresh (fix hilang saat refresh)
 if(activeClipJobs.size>0){ startClipPolling(); }
