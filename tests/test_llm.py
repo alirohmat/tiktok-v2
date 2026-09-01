@@ -19,7 +19,7 @@ def test_clip_duration_validation_fail_short():
 
 def test_clip_duration_validation_fail_long():
     with pytest.raises(ValidationError):
-        Clip(start_time=0, end_time=46, hook_text="hook", virality_score=90)
+        Clip(start_time=0, end_time=91, hook_text="hook", virality_score=90)
 
 
 def test_clipplan_valid():
@@ -48,7 +48,7 @@ def test_muse_mock_plan_duration():
     plan = client.analyze(t, duration=40)
     assert len(plan.clips) >= 1
     for c in plan.clips:
-        assert 15 <= c.end_time - c.start_time <= 45
+        assert 15 <= c.end_time - c.start_time <= 90
 
 
 def test_muse_mock_short_duration():

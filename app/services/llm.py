@@ -70,7 +70,7 @@ class MuseClient:
             f"Video duration: {dur:.1f}s\n"
             f"Transcript with word timestamps (word[start-end]):\n{words_text}\n\n"
             f"Full text: {transcript.text[:2000]}\n\n"
-            f"Select best clips 15-45s each, identify dead_air and broll_cues. Return ONLY JSON."
+            f"Select best clips 55-90s each (min15 max90), seo_keyword hyphenated, caption keyword first 50 chars, 3-5 hashtags, CTA Share/Save, engagement 3+2, niche profit tier. Return ONLY JSON."
         )
 
         # If no key, return mock for testing
@@ -180,33 +180,36 @@ class MuseClient:
 
     def _mock_plan(self, duration: float) -> ClipPlan:
         """Deterministic mock when no API key."""
-        # Create 2 clips covering duration, 15-30s each
-        clips = []
-        if duration >= 30:
+        # 55-90s preferred; mock 1-2 clips
+        import re as _re
+        def _slug(t: str) -> str:
+            s = _re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")
+            return s[:32] or "viral-hook"
+        clips: list[dict] = []
+        if duration >= 60:
             mid = duration / 2
-            clips.append(
-                {"start_time": 0.0, "end_time": min(30.0, duration * 0.6), "hook_text": "You won't believe what happens next", "virality_score": 92}
-            )
-            if duration > 35:
-                clips.append(
-                    {"start_time": mid, "end_time": min(duration, mid + 25.0), "hook_text": "This changes everything you thought", "virality_score": 88}
-                )
+            kw1 = "cara-atasi-insomnia"
+            clips.append({"start_time": 0.0, "end_time": min(70.0, duration * 0.6), "hook_text": "Stop scroll — cara atasi insomnia ini gila", "virality_score": 92, "seo_keyword": kw1, "caption": f"{kw1.replace('-',' ')} tanpa obat ini rahasia dokter jarang bongkar — tonton sampai akhir", "hashtags": ["#insomnia", "#tidurnyenyak", "#kesehatantidur", "#tipssehat"], "cta_text": "Save video ini & Share ke teman yang susah tidur →"})
+            if duration > 80:
+                kw2 = "tips-tidur-nyenyak"
+                clips.append({"start_time": mid, "end_time": min(duration, mid + 60.0), "hook_text": "Ini ubah tidurmu malam ini juga", "virality_score": 88, "seo_keyword": kw2, "caption": f"{kw2.replace('-',' ')} 3 langkah simpel buktikan malam ini", "hashtags": ["#tipssehat", "#tidurnyenyak", "#kesehatan"], "cta_text": "Share ke teman begadang & Save buat nanti →"})
+        elif duration >= 30:
+            kw = "tips-tidur-nyenyak"
+            clips.append({"start_time": 0.0, "end_time": min(60.0, duration), "hook_text": "Cara tidur nyenyak tanpa obat", "virality_score": 88, "seo_keyword": kw, "caption": f"{kw.replace('-',' ')} ini wajib coba malam ini", "hashtags": ["#tidurnyenyak", "#kesehatan", "#tipssehat"], "cta_text": "Save & Share ke yang butuh →"})
         else:
-            clips.append(
-                {"start_time": 0.0, "end_time": duration, "hook_text": "Watch until the end", "virality_score": 85}
-            )
-            # Ensure duration 15-45, if shorter than 15 pad not needed - but validator requires >=15
-            # If duration <15, mock still must satisfy validator -> adjust to 15
+            kw = _slug("Watch until the end")
+            clips.append({"start_time": 0.0, "end_time": duration, "hook_text": "Watch until the end", "virality_score": 85, "seo_keyword": kw, "caption": f"{kw.replace('-',' ')} tonton sampai habis", "hashtags": ["#viral", "#fyp", "#tips"], "cta_text": "Save & Share →"})
             if duration < 15:
                 clips[0]["end_time"] = 15.0
                 clips[0]["start_time"] = 0.0
-
-        return ClipPlan.model_validate(
-            {
-                "clips": clips,
-                "dead_air": [{"start": 5.0, "end": 5.6}] if duration > 10 else [],
-                "broll_cues": [
-                    {"timestamp": (clips[0]["end_time"] + clips[0]["start_time"]) / 2, "keywords_en": "burning money", "fallback_en": "stressed office worker"}
-                ],
-            }
-        )
+        # ensure seo_keyword fallback
+        for c in clips:
+            if not c.get("seo_keyword"):
+                c["seo_keyword"] = _slug(c["hook_text"])
+            if not c.get("caption"):
+                c["caption"] = c["seo_keyword"].replace("-", " ") + " — tonton sampai akhir"
+            if not c.get("hashtags"):
+                c["hashtags"] = [f"#{c['seo_keyword'].split('-')[0]}", "#tipssehat", "#viral"]
+            if not c.get("cta_text"):
+                c["cta_text"] = "Save video ini & Share ke teman →"
+        return ClipPlan.model_validate({"clips": clips, "dead_air": [], "broll_cues": [{"timestamp": (clips[0]["end_time"] + clips[0]["start_time"]) / 2, "keywords_en": "burning money", "fallback_en": "stressed office worker"}], "engagement_comments": ["Menurut kalian ini settingan atau real? Komen jujur", "Tim insomnia jam 2 pagi absen dulu 🙋", "Pernah coba cara ini? Share hasil kalian"], "engagement_replies": ["Setuju, aku juga mikir gitu — coba detik 12", "Relate banget, aku dulu gini juga"], "niche_tag": "kesehatan", "niche_profit_tier": "8-15%", "niche_approved": True})

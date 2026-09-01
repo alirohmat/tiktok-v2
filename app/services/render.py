@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
+import re
+
 from pathlib import Path
 
 from app.models.schemas import Clip, ClipPlan, Transcript
 from app.utils.autoframe import detect_crop_window
 from app.utils.ffmpeg_builder import FFmpegBuilder
+
+
+def _slug(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return s[:40] or "viral-clip"
 
 
 class RenderEngine:
@@ -48,7 +56,6 @@ class RenderEngine:
             c for c in clip_plan.broll_cues if clip.start_time <= c.timestamp <= clip.end_time
         ]
         # Match broll_paths to relevant_cues (assume ordered)
-        # If more cues than paths, truncate; if fewer, pad
         if len(broll_paths) > len(relevant_cues):
             broll_paths = broll_paths[: len(relevant_cues)]
             relevant_cues = relevant_cues[: len(broll_paths)]
@@ -71,6 +78,8 @@ class RenderEngine:
             broll_cues=relevant_cues,
             broll_paths=broll_paths,
             hook_text=clip.hook_text,
+            seo_keyword=clip.seo_keyword or _slug(clip.hook_text),
+            cta_text=clip.cta_text or "Save video ini & Share ke teman →",
             crop_window=crop_window,
         )
         if build_only:
@@ -88,18 +97,53 @@ class RenderEngine:
     ) -> list[Path]:
         """
         Render all clips in plan. broll_map: keyword -> local preview path.
+        Output filename: {seo_keyword}-{idx:02d}_{start}_{end}.mp4 (SEO hyphenated)
+        Also writes caption.txt + engagement.json per job.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
         outputs: list[Path] = []
+
+        # Write engagement pack once per job (patch 3)
+        try:
+            engagement = {
+                "niche_tag": clip_plan.niche_tag,
+                "niche_profit_tier": clip_plan.niche_profit_tier,
+                "niche_approved": clip_plan.niche_approved,
+                "comments": clip_plan.engagement_comments,
+                "replies": clip_plan.engagement_replies,
+            }
+            (output_dir / "engagement.json").write_text(json.dumps(engagement, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
         for idx, clip in enumerate(clip_plan.clips):
-            # Collect B-Roll paths for this clip's cues
             relevant_cues = [c for c in clip_plan.broll_cues if clip.start_time <= c.timestamp <= clip.end_time]
             paths: list[Path] = []
             for cue in relevant_cues:
                 p = broll_map.get(cue.keywords_en) or broll_map.get(cue.fallback_en)
                 if p and p.exists():
                     paths.append(p)
-            out = output_dir / f"clip_{idx:02d}_{clip.start_time:.0f}_{clip.end_time:.0f}.mp4"
+            # SEO filename
+            kw = (clip.seo_keyword or _slug(clip.hook_text)).strip("-")
+            kw = re.sub(r"[^a-z0-9-]+", "-", kw.lower()).strip("-")[:40] or "viral-clip"
+            out = output_dir / f"{kw}-{idx:02d}_{clip.start_time:.0f}_{clip.end_time:.0f}.mp4"
+            # sanitize: ensure no spaces
             self.render_clip(src, clip, transcript, clip_plan, paths, out)
             outputs.append(out)
+
+            # Sidecar caption.txt (patch 1: keyword first 50 chars + hashtags)
+            try:
+                caption = clip.caption or f"{kw.replace('-',' ')} — tonton sampai akhir"
+                hashtags = " ".join(clip.hashtags) if clip.hashtags else ""
+                # enforce keyword in first 50 chars
+                kw_words = kw.replace("-", " ")
+                if kw_words.lower() not in caption.lower()[:60]:
+                    caption = f"{kw_words} — {caption}"
+                txt = caption.strip()
+                if hashtags:
+                    txt += "\n\n" + hashtags
+                (out.with_suffix(".txt")).write_text(txt, encoding="utf-8")
+            except Exception:
+                pass
+
         return outputs

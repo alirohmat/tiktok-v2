@@ -25,6 +25,16 @@ from app.services.transcription import stitch_transcripts, transcribe_file_groq
 from app.utils.audio import chunk_audio, extract_audio, get_duration
 from app.workers.celery_app import celery_app
 
+# auto-editor 2-pass helpers (binary, not pip — see Dockerfile)
+try:
+    from app.services.auto_editor import export_dead_air as _ae_export
+    from app.services.auto_editor import is_available as _ae_available
+    from app.services.auto_editor import trim_silence as _ae_trim
+except ImportError:
+    _ae_available = lambda: False  # type: ignore[assignment]
+    _ae_trim = lambda s, d, **kw: s  # type: ignore[assignment]
+    _ae_export = lambda *a, **kw: []  # type: ignore[assignment]
+
 
 def _transcribe_impl(chunk_path: str, start_time: float, chunk_index: int) -> dict[str, Any]:
     result = transcribe_file_groq(Path(chunk_path), offset=start_time)
@@ -95,9 +105,23 @@ def extract_and_chunk(src_path: str, job_id: str) -> dict[str, Any]:
     job_dir = storage / "cache" / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    # Extract audio
+    # PASS 1 global: auto-editor trim silence BEFORE Whisper (hemat Groq 10-20% + 10/m throttle)
+    effective_src = src
+    try:
+        if _ae_available():
+            trimmed = job_dir / "trimmed.mp4"
+            # try trim; fallback to src on fail/unavailable
+            maybe = _ae_trim(src, trimmed, threshold="0.04", margin="0.2s")
+            if maybe != src and Path(maybe).exists() and Path(maybe).stat().st_size > 0:
+                effective_src = Path(maybe)
+                logger.info("PASS 1 auto-editor: %s -> %s (%.1f MB -> %.1f MB)", src.name, trimmed.name, src.stat().st_size/1e6, effective_src.stat().st_size/1e6)
+    except Exception as exc:
+        logger.warning("PASS 1 skip: %s", exc)
+        effective_src = src
+
+    # Extract audio from effective_src (trimmed if PASS1 succeeded)
     audio_path = job_dir / "audio.wav"
-    extract_audio(src, audio_path)
+    extract_audio(effective_src, audio_path)
 
     # Chunk: pakai config untuk podcast panjang (180s default, <25 MB)
     chunk_dir = job_dir / "chunks"
@@ -120,9 +144,9 @@ def extract_and_chunk(src_path: str, job_id: str) -> dict[str, Any]:
     for idx, (p, start, dur) in enumerate(raw):
         chunks.append({"path": str(p), "start_time": start, "duration": dur, "index": idx})
 
-    total_duration = get_duration(src)
+    total_duration = get_duration(effective_src)
     logger.info("Podcast chunked: %.1f menit -> %s chunk @%ss (free tier aman)", total_duration / 60, len(chunks), chunk_sec)
-    return {"job_id": job_id, "src": src_path, "chunks": chunks, "total_duration": total_duration}
+    return {"job_id": job_id, "src": src_path, "effective_src": str(effective_src), "chunks": chunks, "total_duration": total_duration}
 
 
 @celery_app.task(name="app.workers.tasks.stitch")
@@ -140,6 +164,7 @@ def stitch(results: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any
     return {
         "job_id": meta["job_id"],
         "src": meta["src"],
+        "effective_src": meta.get("effective_src", meta["src"]),
         "transcript": transcript.model_dump(mode="json"),
         "total_duration": total_duration,
     }
@@ -156,6 +181,7 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": data["job_id"],
         "src": data["src"],
+        "effective_src": data.get("effective_src", data["src"]),
         "transcript": data["transcript"],
         "clip_plan": plan.model_dump(mode="json"),
         "total_duration": total_duration,
@@ -198,6 +224,7 @@ def source_broll(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": data["job_id"],
         "src": data["src"],
+        "effective_src": data.get("effective_src", data["src"]),
         "transcript": data["transcript"],
         "clip_plan": data["clip_plan"],
         "broll_map": broll_map,
@@ -213,12 +240,23 @@ def render_clips(data: dict[str, Any]) -> dict[str, Any]:
     plan = ClipPlan.model_validate(data["clip_plan"])
     broll_map_str: dict[str, str] = data.get("broll_map", {})
     broll_map = {k: Path(v) for k, v in broll_map_str.items()}
-    src = Path(data["src"])
+    # PASS 1 trimmed source if available (timestamps already relative to it)
+    src = Path(data.get("effective_src") or data["src"])
     job_id: str = data["job_id"]
 
     settings = get_settings()
     # Use resolved_music_path helper (checks project root and storage)
     music_path = settings.resolved_music_path
+
+    # PASS 2: override LLM dead_air with deterministic auto-editor gaps
+    try:
+        if _ae_available() and src.exists():
+            ae_dead = _ae_export(src, threshold="0.03", margin="0.1s", hook_protect_until=3.0)
+            if ae_dead:
+                plan.dead_air = ae_dead  # type: ignore[assignment]
+                logger.info("PASS 2 auto-editor dead_air: %s segments -> FFmpeg select cut", len(ae_dead))
+    except Exception as exc:
+        logger.warning("PASS 2 dead_air export skip: %s", exc)
 
     output_dir = settings.storage_path / "renders" / job_id
     engine = RenderEngine(music_path=music_path)
@@ -226,7 +264,7 @@ def render_clips(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": job_id,
         "outputs": [str(p) for p in outputs],
-        "clip_plan": data["clip_plan"],
+        "clip_plan": plan.model_dump(mode="json"),
     }
 
 

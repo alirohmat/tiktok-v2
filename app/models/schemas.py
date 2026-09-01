@@ -51,6 +51,11 @@ class Clip(BaseModel):
     end_time: float = Field(ge=0)
     hook_text: str = Field(min_length=1, max_length=200)
     virality_score: int = Field(ge=0, le=100)
+    # SEO + CTA (patch 1-2)
+    seo_keyword: str = Field(default="", max_length=80, description="2-4 word hyphenated keyword, e.g. cara-atasi-insomnia")
+    caption: str = Field(default="", max_length=500, description="keyword in first 50 chars")
+    hashtags: list[str] = Field(default_factory=list, description="3-5 hashtags")
+    cta_text: str = Field(default="", max_length=200, description="Save/Share CTA")
 
     @field_validator("end_time")
     @classmethod
@@ -58,11 +63,25 @@ class Clip(BaseModel):
         start = info.data.get("start_time")
         if start is not None:
             dur = v - start
-            if dur < 15 or dur > 45:
-                raise ValueError(f"clip duration must be 15-45s, got {dur:.2f}")
+            if dur < 15 or dur > 90:
+                raise ValueError(f"clip duration must be 15-90s, got {dur:.2f}")
             if v <= start:
                 raise ValueError("end_time must be > start_time")
         return v
+
+    @field_validator("hashtags")
+    @classmethod
+    def check_hashtags(cls, v: list[str]) -> list[str]:  # type: ignore[no-untyped-def]
+        # normalize: ensure # prefix, max 5
+        out = []
+        for h in v[:5]:
+            h = h.strip()
+            if not h:
+                continue
+            if not h.startswith("#"):
+                h = "#" + h
+            out.append(h)
+        return out
 
 
 class DeadAir(BaseModel):
@@ -90,6 +109,12 @@ class ClipPlan(BaseModel):
     clips: list[Clip] = Field(min_length=1)
     dead_air: list[DeadAir] = Field(default_factory=list)
     broll_cues: list[BrollCue] = Field(default_factory=list)
+    # Engagement + niche (patch 3-4)
+    engagement_comments: list[str] = Field(default_factory=list, description="3 polarizing prompts e.g. Menurut kalian settingan?")
+    engagement_replies: list[str] = Field(default_factory=list, description="reply templates for 30-60min window")
+    niche_tag: str = Field(default="", description="mikro-niche, e.g. kesehatan")
+    niche_profit_tier: str = Field(default="", description="8-15% / 5-15% etc")
+    niche_approved: bool = Field(default=True, description="LLM filter profit 8-15%")
 
     @model_validator(mode="after")
     def check_timestamps(self) -> ClipPlan:

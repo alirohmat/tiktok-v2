@@ -86,6 +86,8 @@ class FFmpegBuilder:
         broll_cues: list[BrollCue],
         broll_paths: list[Path],
         hook_text: str = "",
+        seo_keyword: str = "",
+        cta_text: str = "",
         crop_window: tuple[int, int, int, int] | None = None,
     ) -> list[str]:
         """
@@ -151,12 +153,27 @@ class FFmpegBuilder:
             v_label = next_v
             next_v = f"v{len(filter_parts)}"
 
-        # Dead air removal is handled via pre-trim segmentation or select filter.
-        # For simplicity in MVP, we apply trim-based jump cuts by generating concat segments.
-        # If dead_air present, we would need to cut segments; v1 documents and skips complex select
-        # and leaves it to builder documentation. We add a comment filter placeholder:
-        # No additional filter if dead_air empty; otherwise would need select.
-        # For now, skip dead_air video filter and assume pre-trim handled externally.
+        # PASS 2 dead_air jump-cut — video part (audio part applied after pitch)
+        rel_dead_air: list[tuple[float, float]] = []
+        if dead_air:
+            for d in dead_air:
+                s = float(d.start) - clip_start
+                e = float(d.end) - clip_start
+                if e <= 0 or s >= duration:
+                    continue
+                s = max(s, 0.0)
+                e = min(e, duration)
+                if e <= 3.0:
+                    continue
+                if s < 3.0 < e:
+                    s = 3.0
+                if e - s >= 0.2:
+                    rel_dead_air.append((s, e))
+            if rel_dead_air:
+                expr_v = "+".join(f"between(t\\,{s:.3f}\\,{e:.3f})" for s, e in rel_dead_air)
+                nxt_v_da = f"v{len(filter_parts)+80}"
+                filter_parts.append(f"[{v_label}]select='not({expr_v})',setpts=N/FRAME_RATE/TB[{nxt_v_da}];")
+                v_label = nxt_v_da
 
         # B-Roll overlay via glitch transition (xfade)
         # For multiple B-Rolls, chain xfade or overlay enable
@@ -183,7 +200,7 @@ class FFmpegBuilder:
             safe_hook = _escape_drawtext(hook_text)
             ff = _fontfile_arg()
             filter_parts.append(
-                f"[{v_label}]drawtext=text='{safe_hook}'{ff}:fontcolor=white:fontsize=48:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h-220:enable='between(t,0,3)'[{next_v}];"
+                f"[{v_label}]drawtext=text='{safe_hook}'{ff}:fontcolor=white:fontsize=60:box=1:boxcolor=black@0.75:boxborderw=12:x=(w-text_w)/2:y=80:enable='between(t,0,3)'[{next_v}];"
             )
             # Also add per-word kinetic if transcript available (approximate split)
             if self.transcript and self.transcript.words:
@@ -191,6 +208,22 @@ class FFmpegBuilder:
                 pass
             v_label = next_v
             # No extra step needed
+
+        # SEO keyword overlay OCR 0.2-2.7s (riset: keyword tebal 2-3 detik pertama di-scan OCR)
+        if seo_keyword:
+            safe_kw = _escape_drawtext(seo_keyword.replace("-", " ").upper())
+            ff2 = _fontfile_arg()
+            next_kw = f"v{len(filter_parts)+44}"
+            filter_parts.append(f"[{v_label}]drawtext=text='{safe_kw}'{ff2}:fontcolor=yellow:fontsize=48:box=1:boxcolor=black@0.55:boxborderw=8:x=(w-text_w)/2:y=(h*0.35):enable='between(t,0.2,2.7)'[{next_kw}];")
+            v_label = next_kw
+
+        # CTA Share/Save last 5s bottom (panah ke kiri-bawah keranjang)
+        if cta_text:
+            safe_cta = _escape_drawtext(cta_text)
+            ff3 = _fontfile_arg()
+            next_cta = f"v{len(filter_parts)+45}"
+            filter_parts.append(f"[{v_label}]drawtext=text='{safe_cta}'{ff3}:fontcolor=white:fontsize=38:box=1:boxcolor=red@0.7:boxborderw=10:x=(w-text_w)/2:y=h-160:enable='gte(t,{duration-5:.1f})'[{next_cta}];")
+            v_label = next_cta
 
         final_v = v_label
 
@@ -203,6 +236,13 @@ class FFmpegBuilder:
         )
         a_label = next_a
         next_a = f"a{len(filter_parts)+20}"
+        # PASS 2 audio jump-cut (mirror video select)
+        if rel_dead_air:
+            expr_a = "+".join(f"between(t\\,{s:.3f}\\,{e:.3f})" for s, e in rel_dead_air)
+            nxt_a_da2 = f"a{len(filter_parts)+85}"
+            filter_parts.append(f"[{a_label}]aselect='not({expr_a})',asetpts=N/SR/TB[{nxt_a_da2}];")
+            a_label = nxt_a_da2
+            next_a = f"a{len(filter_parts)+86}"
 
         # Ultrasonic 19kHz sine mixed at low volume
         if self.enable_ultrasonic:

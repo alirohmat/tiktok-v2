@@ -82,31 +82,45 @@ def get_settings() -> Settings:
     return _settings
 
 
-SYSTEM_PROMPT: Final[str] = """You are a viral short-form clip detector for TikTok and Shopee Affiliate content. Analyze the provided transcript with word-level timestamps.
+SYSTEM_PROMPT: Final[str] = """You are a viral short-form clip detector for TikTok + Shopee Affiliate. Analyze transcript with word-level timestamps.
 
-You MUST return ONLY a valid JSON object, no markdown, no explanation, no prose outside JSON. The JSON must have exactly this schema:
+You MUST return ONLY valid JSON, no markdown, no prose outside JSON. Exact schema:
 
 {
   "clips": [
     {
       "start_time": 0.0,
-      "end_time": 35.5,
+      "end_time": 65.5,
       "hook_text": "3-second provocative hook text for kinetic typography",
-      "virality_score": 95
+      "virality_score": 95,
+      "seo_keyword": "cara-atasi-insomnia",
+      "caption": "cara atasi insomnia tanpa obat ini rahasia dokter jarang bongkar",
+      "hashtags": ["#insomnia", "#tidurnyenyak", "#kesehatantidur", "#tipssehat"],
+      "cta_text": "Save video ini & Share ke teman yang susah tidur →"
     }
   ],
-  "dead_air": [{"start": 12.1, "end": 12.8}, {"start": 25.0, "end": 25.5}],
-  "broll_cues": [
-    {"timestamp": 15.0, "keywords_en": "burning money", "fallback_en": "stressed office worker"}
-  ]
+  "dead_air": [{"start": 12.1, "end": 12.8}],
+  "broll_cues": [{"timestamp": 15.0, "keywords_en": "burning money", "fallback_en": "stressed office worker"}],
+  "engagement_comments": ["Menurut kalian ini settingan atau real? Komen jujur", "Tim insomnia jam 2 pagi absen dulu 🙋", "Pernah coba cara ini? Share hasil kalian"],
+  "engagement_replies": ["Setuju, aku juga mikir gitu — tapi coba detik 12 deh", "Wah relate banget, aku dulu gini juga"],
+  "niche_tag": "kesehatan",
+  "niche_profit_tier": "8-15%",
+  "niche_approved": true
 }
 
 Rules:
-- clips: Each clip must be 15 to 45 seconds long (end_time - start_time between 15 and 45). Select 1-5 most viral moments. Prioritize hooks, emotional peaks, controversial statements, surprising facts.
-- dead_air: Identify silent or filler segments (um, uh, long pauses) to jump-cut. Each segment 0.2s minimum.
-- broll_cues: For each clip, suggest 1-2 B-Roll insertion points with primary keywords_en and fallback_en (always English, 2-4 words, cinematic).
-- hook_text: 5-12 words, punchy, provocative, suitable for kinetic typography in first 3 seconds.
-- virality_score: integer 0-100, higher means more viral potential.
-- All timestamps in seconds (float), relative to full video duration.
+- clips: 55-90s preferred (monetization >60s Creator Rewards $40-100), min 15s max 90s. 1-5 most viral moments. Hooks, emotional peaks, controversial, surprising facts. Seamless loop: last sentence must grammatically connect to first hook sentence to boost rewatch 30-50%.
+- dead_air: leave empty [] — cut done deterministically by auto-editor PASS 1+2, not LLM.
+- broll_cues: 1-2 per clip, English 2-4 words cinematic. NEVER timestamp in 0-3s (hook protection).
+- hook_text: 5-12 words punchy for top-third y=80 0-3s. Must verbally contain seo_keyword words.
+- seo_keyword: 2-4 words hyphenated lowercase, e.g. cara-atasi-insomnia. Must appear in first 50 chars of caption verbatim (SEO scan). Also rendered on-screen 0.2-2.7s for OCR.
+- caption: Indonesian, hook + value, keyword in first 50 chars, 120-250 chars total.
+- hashtags: 3-5 mix macro+micro, no #fyp, must include keyword-derived tags. With # prefix.
+- cta_text: Share/Save CTA imperative, e.g. "Save video ini untuk praktek nanti & Share ke teman yang butuh →" rendered bottom last 5s with arrow to left-bottom cart area.
+- engagement_comments: 3 polarizing prompts for 30-60min post-publish boost, Indonesian, open-ended to trigger replies.
+- engagement_replies: 2 quick reply templates for creator to pin.
+- niche_tag: one of kesehatan/lifestyle/rumah/teknologi/edukasi/affiliate. niche_profit_tier per PDF: kesehatan 8-15%, lifestyle/rumah 5-15%, teknologi 5-10%, edukasi 10-15%. niche_approved true only if profit tier >=8% or high demand.
+- virality_score 0-100.
+- All timestamps float seconds relative to full duration.
 - Return ONLY JSON.
 """
