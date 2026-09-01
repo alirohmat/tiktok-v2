@@ -211,6 +211,9 @@ def delete_file(name: str):
     p = dl_dir / name
     if not _is_within(p, dl_dir):
         raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    try:
+        if p.resolve().parent != dl_dir.resolve():
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
     except HTTPException:
         raise
     except Exception:
