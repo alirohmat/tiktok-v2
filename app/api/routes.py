@@ -6,9 +6,11 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+import asyncio as _asyncio
+import json as _json
 import time as _time
 
 from app.core.config import get_settings
@@ -343,6 +345,93 @@ def clip_diagnostics() -> dict:
     except Exception as e:
         storage_stats = {"error": str(e)[:300]}
     return {"ok": True, "disk": disk, "keys": keys, "quota_error": quota_err, "jobs": jobs_info, "storage_stats": storage_stats}
+
+
+@router.get("/clip/events")
+async def clip_events(request: Request):  # type: ignore[no-untyped-def]
+    """SSE real-time — push clip+jobs+ytdlp saat berubah, heartbeat 1.5s. Ganti polling 1.5s spam."""
+    settings = get_settings()
+
+    async def _gen():  # type: ignore[no-untyped-def]
+        last_sig: str | None = None
+        tick = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            # snapshot clip jobs (lean mode)
+            try:
+                clip_jobs = [js.model_dump(mode="json") for js in list(CLIP_JOBS.values())]
+            except Exception:
+                clip_jobs = []
+            # ytdlp jobs
+            ytdlp_jobs: list[dict] = []
+            try:
+                from app.services.ytdlp_service import JOBS as _YJOBS
+
+                # keep minimal fields to avoid huge SSE
+                for jid, j in list(_YJOBS.items())[-20:]:
+                    ytdlp_jobs.append(
+                        {
+                            "job_id": getattr(j, "job_id", jid),
+                            "url": getattr(j, "url", ""),
+                            "status": getattr(j, "status", ""),
+                            "progress": getattr(j, "progress", 0),
+                            "filename": getattr(j, "filename", ""),
+                            "error": (getattr(j, "error", "") or "")[:400],
+                        }
+                    )
+            except Exception:
+                pass
+            # renders list
+            renders: list[dict] = []
+            try:
+                base = settings.storage_path / "renders"
+                if base.exists():
+                    for job_dir in sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:12]:
+                        if not job_dir.is_dir():
+                            continue
+                        for p in sorted(job_dir.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True)[:6]:
+                            renders.append({"job_id": job_dir.name, "filename": p.name, "size": p.stat().st_size, "mtime": p.stat().st_mtime})
+            except Exception:
+                pass
+            # disk only every 10 ticks (~15s) to avoid syscall spam
+            disk = None
+            if tick % 10 == 0:
+                try:
+                    disk = _disk_info()
+                except Exception:
+                    disk = None
+            # health quick
+            ffmpeg_ok = True
+            try:
+                import shutil as _sh
+
+                ffmpeg_ok = bool(_sh.which("ffmpeg"))
+            except Exception:
+                pass
+            payload = {
+                "type": "snapshot",
+                "ts": _time.time(),
+                "clip_jobs": clip_jobs,
+                "ytdlp_jobs": ytdlp_jobs,
+                "renders": renders,
+                "disk": disk,
+                "ffmpeg": "ok" if ffmpeg_ok else "missing",
+                "tick": tick,
+            }
+            sig = str(len(clip_jobs)) + "|" + "|".join(f"{c.get('job_id','')[:8]}:{c.get('status','')}:{round(float(c.get('progress',0)),2)}" for c in clip_jobs[:20])
+            sig += "|" + str(len(ytdlp_jobs)) + "|" + str(len(renders))
+            # always send heartbeat comment to keep connection alive, data only when changed or every 2 ticks
+            if sig != last_sig or tick % 2 == 0:
+                last_sig = sig
+                data = _json.dumps(payload, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+            else:
+                yield ": ping\n\n"
+            tick += 1
+            await _asyncio.sleep(1.5)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
 
 
 @router.post("/clip", response_model=JobStatus)

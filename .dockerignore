@@ -28,3 +28,6 @@ storage/downloads/*.opus
 docker-compose.override.yml
 tmp
 *.log
+frontend/node_modules
+frontend/dist
+app/static/dist

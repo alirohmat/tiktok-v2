@@ -1,5 +1,12 @@
 # syntax=docker/dockerfile:1.6
-# Stable production image for yt-dlp Control Center + TikTok Clipper
+# Multi-stage: Svelte+Vite frontend -> Python slim runtime
+FROM node:20-alpine AS frontend-builder
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -36,6 +43,9 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY app ./app
 COPY storage ./storage
 COPY .env.example .env.example
+# Svelte dist (built in frontend-builder) — fallback to legacy index.html if not built locally
+COPY --from=frontend-builder /build/dist ./app/static/dist
+
 # Ensure storage + optional dirs exist; do NOT hard-require assets/fixtures in build context (fresh clone may lack them)
 RUN mkdir -p assets fixtures storage/downloads storage/uploads storage/renders storage/previews storage/cache \
     && chmod -R 777 storage

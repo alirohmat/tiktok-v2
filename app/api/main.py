@@ -68,27 +68,42 @@ def api_get_render(job_id: str, filename: str):
         raise HTTPException(status_code=404, detail="File not found")
     return _FileResponse(path, media_type="video/mp4", filename=filename)
 
-# Serve static frontend (yt-dlp UI)
+# Serve static frontend (yt-dlp UI) — prefer Svelte dist, fallback legacy index.html
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 static_dir = Path(__file__).parent.parent / "static"
 static_dir.mkdir(parents=True, exist_ok=True)
+dist_dir = static_dir / "dist"
 
-# mount /static for assets if needed
+# mount /static for legacy assets, /assets for Vite build
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+if dist_dir.exists():
+    # Vite assets are dist/assets
+    assets_dir = dist_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets-svelte")
+
 
 @app.get("/", include_in_schema=False)
 def serve_index():
+    # Prefer Svelte SPA
+    idx_dist = dist_dir / "index.html"
+    if idx_dist.exists():
+        return FileResponse(idx_dist, media_type="text/html")
     idx = static_dir / "index.html"
     if idx.exists():
         return FileResponse(idx, media_type="text/html")
     return {"message": "yt-dlp UI not built yet", "docs": "/docs"}
 
+
 @app.get("/ytdlp", include_in_schema=False)
 def serve_ytdlp():
+    idx_dist = dist_dir / "index.html"
+    if idx_dist.exists():
+        return FileResponse(idx_dist, media_type="text/html")
     idx = static_dir / "index.html"
     if idx.exists():
         return FileResponse(idx, media_type="text/html")
