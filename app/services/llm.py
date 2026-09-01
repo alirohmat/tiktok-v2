@@ -81,15 +81,33 @@ class MuseClient:
         from openai import OpenAI  # type: ignore[import-untyped]
 
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-            response_format={"type": "json_object"},
-        )
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+        except Exception as e:
+            msg = str(e)
+            # 404 model_not_found -> beri pesan jelas + fallback ke mock agar clip tidak FAILURE
+            if "404" in msg or "model_not_found" in msg or "NotFoundError" in type(e).__name__:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Muse model %r tidak ditemukan di %s (404). Cek MUSE_MODEL & MUSE_BASE_URL. Fallback ke mock plan agar clip tetap jalan. Error: %s",
+                    self.model, self.base_url, e,
+                )
+                # fallback ke mock agar pipeline tetap lanjut (anti menggantung)
+                return self._mock_plan(dur)
+            # auth / rate limit juga fallback agar tidak FAILURE total
+            if "401" in msg or "403" in msg or "429" in msg:
+                import logging
+                logging.getLogger(__name__).warning("Muse API auth/rate error (%s), fallback mock: %s", type(e).__name__, e)
+                return self._mock_plan(dur)
+            raise
         raw = response.choices[0].message.content or ""
         return self._parse_and_validate(raw, dur, client, user_prompt)
 
@@ -114,17 +132,24 @@ class MuseClient:
                 if client is None:
                     settings = get_settings()
                     client = OpenAI(api_key=settings.muse_api_key, base_url=settings.muse_base_url)
-                resp = client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                        {"role": "assistant", "content": raw},
-                        {"role": "user", "content": repair_prompt},
-                    ],
-                    temperature=0.1,
-                    response_format={"type": "json_object"},
-                )
+                try:
+                    resp = client.chat.completions.create(
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                            {"role": "assistant", "content": raw},
+                            {"role": "user", "content": repair_prompt},
+                        ],
+                        temperature=0.1,
+                        response_format={"type": "json_object"},
+                    )
+                except Exception as e2:
+                    if "404" in str(e2) or "model_not_found" in str(e2):
+                        import logging
+                        logging.getLogger(__name__).warning("Repair 404 model_not_found, fallback mock: %s", e2)
+                        return self._mock_plan(dur)
+                    raise
                 raw2 = resp.choices[0].message.content or ""
                 cleaned2 = _extract_json(raw2)
                 data2 = json.loads(cleaned2)
