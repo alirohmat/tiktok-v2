@@ -21,7 +21,12 @@ class Settings(BaseSettings):
     groq_max_file_mb: int = 25
     groq_concurrent_chunks: int = 1  # free tier: sekuensial, hemat kuota
     groq_enable_cache: bool = True  # transcript JSON cache by audio sha (hemat re-clip)
-    groq_enable_local_fallback: bool = True  # 402/429 -> mock still returns words 2s-step so LLM still clips 55-90s
+    groq_enable_local_fallback: bool = False  # user forbid mock — 402/429 raise, tidak silent mock
+
+    # Nvidia Build fallback (OpenAI-compatible) — Groq 402/429 -> Nvidia gratis 1000 kredit tanpa kartu
+    nvidia_api_key: str = ""  # nvapi-xxx from https://build.nvidia.com/settings/api-keys
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_whisper_model: str = "openai/whisper-large-v3"
 
     # Muse Spark (OpenAI-compatible) — contributor tetap bisa, code fallback otomatis ke base untuk chat
     muse_api_key: str = ""

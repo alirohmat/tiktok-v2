@@ -125,18 +125,43 @@ def _is_payload_too_large(exc: Exception) -> bool:
 
 
 def _mock_result(chunk_path: Path) -> dict[str, Any]:
-    dur = 5.0
+    # DISABLED: user forbids mock fallback — raise so callers see real error
+    raise RuntimeError(f"mock disabled — no fallback for {chunk_path.name}, fix Groq/Nvidia key")
+
+
+def _transcribe_nvidia(chunk_path: Path) -> dict[str, Any] | None:
+    settings = get_settings()
+    nkey = getattr(settings, "nvidia_api_key", "") or ""
+    if not nkey or nkey.startswith("your_"):
+        return None
+    nbase = getattr(settings, "nvidia_base_url", "https://integrate.api.nvidia.com/v1")
+    nmodel = getattr(settings, "nvidia_whisper_model", "openai/whisper-large-v3")
     try:
-        dur = get_duration(chunk_path)
-    except Exception:
-        pass
-    n_words = max(1, int(dur * 2))
-    words = []
-    for i in range(n_words):
-        w_start = i * dur / n_words
-        w_end = (i + 1) * dur / n_words * 0.95
-        words.append({"word": f"word{i}", "start": w_start, "end": w_end})
-    return {"text": " ".join(f"word{i}" for i in range(n_words)), "words": words, "segments": []}
+        from openai import OpenAI  # type: ignore[import-untyped]
+        client = OpenAI(api_key=nkey, base_url=nbase)
+        with open(chunk_path, "rb") as f:
+            file_tuple = (chunk_path.name, f.read())
+            try:
+                tr = client.audio.transcriptions.create(
+                    file=file_tuple,
+                    model=nmodel,
+                    response_format="verbose_json",
+                    timestamp_granularities=["word"],  # type: ignore[arg-type]
+                )
+            except TypeError:
+                tr = client.audio.transcriptions.create(
+                    file=file_tuple,
+                    model=nmodel,
+                    response_format="verbose_json",
+                )
+        if isinstance(tr, dict):
+            return tr
+        if hasattr(tr, "model_dump"):
+            return tr.model_dump()  # type: ignore[no-any-return]
+        return dict(tr.__dict__)  # type: ignore[no-any-return]
+    except Exception as e:
+        logger.warning("Nvidia fallback gagal %s: %s", chunk_path.name, e)
+        return None
 
 
 def transcribe_file_groq(
@@ -150,8 +175,7 @@ def transcribe_file_groq(
     mdl = model or settings.groq_whisper_model
 
     if not key or key == "your_groq_api_key":
-        _groq_throttle()
-        return _mock_result(chunk_path)
+        raise RuntimeError(f"GROQ_API_KEY kosong/invalid — set di .env, chunk {chunk_path.name} tidak ditranskrip (no mock)")
 
     # cache hit?
     cp = _cache_path(chunk_path, mdl)
@@ -242,22 +266,25 @@ def transcribe_file_groq(
                 logger.error("Groq 413 %s untuk %s", exc, chunk_path)
                 raise
             if _is_billing_error(exc):
-                if getattr(settings, "groq_enable_local_fallback", True):
-                    logger.warning("Groq 402 billing %s -> fallback mock %s (pipeline lanjut, LLM tetap clip 55-90s)", exc, chunk_path.name)
-                    mock = _mock_result(chunk_path)
+                # 402 -> coba Nvidia dulu, jika ada key. Jika gagal, biar error kelihatan (no mock)
+                nvidia_res = _transcribe_nvidia(chunk_path)
+                if nvidia_res is not None:
+                    logger.warning("Groq 402 %s -> Nvidia sukses %s", exc, chunk_path.name)
                     if cp is not None:
-                        _save_cache(cp, mock)
-                    return mock
+                        _save_cache(cp, nvidia_res)
+                    return nvidia_res
+                logger.error("Groq 402 billing %s untuk %s — no mock, raise", exc, chunk_path.name)
                 raise
             is_rate = _is_rate_limit_error(exc)
             is_retryable = is_rate or "500" in str(exc) or "502" in str(exc) or "503" in str(exc) or "timeout" in str(exc).lower()
             if attempt >= max_retries or not is_retryable:
-                if is_rate and getattr(settings, "groq_enable_local_fallback", True):
-                    logger.warning("Groq 429 max retry %s -> fallback mock %s", exc, chunk_path.name)
-                    mock = _mock_result(chunk_path)
-                    if cp is not None:
-                        _save_cache(cp, mock)
-                    return mock
+                if is_rate:
+                    nvidia_res = _transcribe_nvidia(chunk_path)
+                    if nvidia_res is not None:
+                        logger.warning("Groq 429 max retry %s -> Nvidia sukses %s", exc, chunk_path.name)
+                        if cp is not None:
+                            _save_cache(cp, nvidia_res)
+                        return nvidia_res
                 logger.exception("Groq transcribe gagal chunk %s attempt %s: %s", chunk_path, attempt, exc)
                 raise
             retry_after = _extract_retry_after(exc)
@@ -271,7 +298,7 @@ def transcribe_file_groq(
             logger.warning("Groq %s, retry %s/%s dalam %.1fs: %s", "429" if is_rate else "transient", attempt + 1, max_retries, delay, exc)
             time.sleep(delay)
             continue
-    raise RuntimeError("Groq transcribe gagal setelah retry")
+    raise RuntimeError("Groq transcribe gagal setelah retry — no mock fallback")
 
 
 def stitch_transcripts(
