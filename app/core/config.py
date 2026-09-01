@@ -126,4 +126,9 @@ Rules:
 - virality_score 0-100.
 - All timestamps float seconds relative to full duration.
 - Return ONLY JSON.
+
+Few-shot:
+INPUT Host=Deddy Corbuzier transcript="Hari ini saya kedatangan Prabowo Subianto di studio membahas rahasia tidur"
+OUTPUT {"clips":[{"start_time":0.0,"end_time":65.0,"hook_text":"Prabowo bongkar rahasia tidur 73% orang gagal","virality_score":94,"seo_keyword":"prabowo-bongkar-tidur","caption":"prabowo bongkar tidur rahasia dokter ini bikin 73% orang gagal tidur nyenyak — tonton sampai akhir","hashtags":["#prabowo","#tidurnyenyak","#kesehatan"],"cta_text":"Save video ini & Share ke teman susah tidur →"}],"dead_air":[],"broll_cues":[{"timestamp":15.0,"keywords_en":"presidential office","fallback_en":"studio lights"}],"host_name":"Deddy Corbuzier","guest_names":["Prabowo Subianto"],"engagement_comments":["Menurut kalian Prabowo jujur atau pencitraan?","Tim begadang jam 2 pagi absen 🙋","Pernah coba teknik ini?"],"engagement_replies":["Setuju, detik 12 paling jujur","Relate, aku juga gagal dulu"],"niche_tag":"kesehatan","niche_profit_tier":"8-15%","niche_approved":true}
+If guest_names empty, hook generic: "Stop scroll — cara atasi insomnia ini gila".
 """

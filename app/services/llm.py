@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -41,6 +42,34 @@ def _extract_json(text: str) -> str:
     return text
 
 
+def _slugify(s: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+    return s[:32] or "viral-hook"
+
+
+def _enforce_seo(plan: ClipPlan) -> ClipPlan:
+    """Post-validate: seo_keyword hyphen + caption 50char contains keyword."""
+    for c in plan.clips:
+        if not c.seo_keyword or "-" not in c.seo_keyword:
+            c.seo_keyword = _slugify(c.hook_text or c.caption or "viral-hook")
+            if "-" not in c.seo_keyword:
+                c.seo_keyword = c.seo_keyword + "-viral"
+        # caption first 50 chars must contain keyword words
+        kw_words = c.seo_keyword.replace("-", " ").lower().split()
+        cap_low = (c.caption or "").lower()
+        if c.caption and not any(w in cap_low[:60] for w in kw_words):
+            # prepend keyword
+            prefix = c.seo_keyword.replace("-", " ")
+            c.caption = f"{prefix} {c.caption}".strip()[:500]
+        if not c.caption:
+            c.caption = c.seo_keyword.replace("-", " ") + " — tonton sampai akhir"
+        if not c.hashtags:
+            c.hashtags = [f"#{c.seo_keyword.split('-')[0]}", "#tipssehat", "#viral"]  # type: ignore[assignment]
+        if not c.cta_text:
+            c.cta_text = "Save video ini & Share ke teman →"
+    return plan
+
+
 class MuseClient:
     def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None) -> None:
         settings = get_settings()
@@ -50,20 +79,21 @@ class MuseClient:
 
     def analyze(self, transcript: Transcript, duration: float | None = None, host_name: str | None = None) -> ClipPlan:
         dur = duration or transcript.duration or 60.0
-        words_preview = transcript.words[:300]
+        words_preview = transcript.words[:600]
         words_text = " ".join(f"{w.word}[{w.start:.1f}-{w.end:.1f}]" for w in words_preview)
-        if len(transcript.words) > 300:
-            words_text += f" ... (+{len(transcript.words)-300} more words)"
+        if len(transcript.words) > 600:
+            words_text += f" ... (+{len(transcript.words)-600} more words)"
         host = (host_name or "").strip()
         user_prompt = (
             f"Host channel: {host or '-'} (jangan pakai host untuk hook)\n"
             f"Video duration: {dur:.1f}s\n"
             f"Transcript with word timestamps (word[start-end]):\n{words_text}\n\n"
-            f"Full text: {transcript.text[:2000]}\n\n"
+            f"Full text: {transcript.text[:4000]}\n\n"
             f"Select best clips 55-90s each (min15 max90), guest_names=only invited people (trigger: kedatangan/bersama/tamu/menemui/spesial), hook pakai guest_names jika ada, seo_keyword hyphenated, caption keyword first 50 chars, 3-5 hashtags, CTA Share/Save, engagement 3+2, niche profit tier, host_name/guest_names. Return ONLY JSON."
         )
         if not self.api_key or self.api_key == "your_muse_spark_key":
-            return self._mock_plan(dur, host_name=host)
+            plan = self._mock_plan(dur, host_name=host)
+            return _enforce_seo(plan)
         from openai import OpenAI  # type: ignore[import-untyped]
 
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -72,51 +102,76 @@ class MuseClient:
             return client.chat.completions.create(
                 model=m,
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}],
-                temperature=0.2,
+                temperature=0.4,
                 response_format={"type": "json_object"},
             )
 
-        try:
-            response = _try_create(self.model)
-        except Exception as e:
-            msg = str(e)
-            if "404" in msg or "model_not_found" in msg or "NotFoundError" in type(e).__name__:
-                import logging
-                alt = self.model
-                for suffix in ("-contributor-free", "-contributor", "-free"):
-                    if alt.endswith(suffix):
-                        alt = alt[: -len(suffix)]
-                        break
-                if alt != self.model:
-                    try:
-                        logging.getLogger(__name__).warning("Muse model %r 404, coba fallback ke %r", self.model, alt)
-                        response = _try_create(alt)
-                    except Exception as e2:
-                        logging.getLogger(__name__).warning("Fallback %r juga 404 (%s), fallback mock: %s", alt, e2, e)
-                        return self._mock_plan(dur, host_name=host)
-                else:
-                    logging.getLogger(__name__).warning("Muse model %r 404 di %s, fallback mock: %s", self.model, self.base_url, e)
-                    return self._mock_plan(dur, host_name=host)
-            elif "401" in msg or "403" in msg or "429" in msg:
-                import logging
-                logging.getLogger(__name__).warning("Muse API auth/rate %s fallback mock: %s", type(e).__name__, e)
-                return self._mock_plan(dur, host_name=host)
-            else:
+        # retry 3x 5s on Timeout / HTTP Error per policy
+        response = None
+        last_err = None
+        for attempt in range(3):
+            try:
+                response = _try_create(self.model)
+                break
+            except Exception as e:
+                last_err = e
+                msg = str(e).lower()
+                is_retryable = any(k in msg for k in ("timeout", "timed out", "429", "500", "502", "503", "504", "connection", "http"))
+                is_404 = "404" in str(e) or "model_not_found" in msg or "notfounderror" in type(e).__name__.lower()
+                if is_404:
+                    # model fallback, not retry same
+                    import logging
+
+                    alt = self.model
+                    for suffix in ("-contributor-free", "-contributor", "-free"):
+                        if alt.endswith(suffix):
+                            alt = alt[: -len(suffix)]
+                            break
+                    if alt != self.model:
+                        try:
+                            logging.getLogger(__name__).warning("Muse model %r 404, coba fallback ke %r", self.model, alt)
+                            response = _try_create(alt)
+                            break
+                        except Exception as e2:
+                            logging.getLogger(__name__).warning("Fallback %r juga 404 (%s), fallback mock", alt, e2)
+                            return _enforce_seo(self._mock_plan(dur, host_name=host))
+                    else:
+                        logging.getLogger(__name__).warning("Muse model %r 404 di %s, fallback mock", self.model, self.base_url)
+                        return _enforce_seo(self._mock_plan(dur, host_name=host))
+                if "401" in msg or "403" in msg:
+                    import logging
+
+                    logging.getLogger(__name__).warning("Muse API auth %s fallback mock: %s", type(e).__name__, e)
+                    return _enforce_seo(self._mock_plan(dur, host_name=host))
+                if is_retryable and attempt < 2:
+                    time.sleep(5)
+                    continue
+                if attempt >= 2:
+                    # last attempt failed
+                    if is_retryable:
+                        import logging
+
+                        logging.getLogger(__name__).warning("LLM retry 3x failed (%s), fallback mock", e)
+                        return _enforce_seo(self._mock_plan(dur, host_name=host))
+                    raise
+                # non-retryable
                 raise
+        if response is None:
+            if last_err:
+                raise last_err
+            return _enforce_seo(self._mock_plan(dur, host_name=host))
         raw = response.choices[0].message.content or ""
-        # Post-filter: jangan biarkan host masuk guest_names
         try:
             plan = self._parse_and_validate(raw, dur, client, user_prompt)
             if host and plan.guest_names:
                 plan.guest_names = [g for g in plan.guest_names if g.strip().lower() != host.lower()]
-                # juga filter jika LLM isi host_name beda
                 if plan.host_name and plan.host_name.lower() == host.lower():
                     pass
                 else:
                     plan.host_name = host or plan.host_name
             elif host:
                 plan.host_name = host
-            return plan
+            return _enforce_seo(plan)
         except Exception:
             raise
 
@@ -145,6 +200,7 @@ class MuseClient:
                 except Exception as e2:
                     if "404" in str(e2) or "model_not_found" in str(e2):
                         import logging
+
                         logging.getLogger(__name__).warning("Repair 404, fallback mock: %s", e2)
                         return self._mock_plan(dur)
                     raise
@@ -157,12 +213,6 @@ class MuseClient:
 
     def _mock_plan(self, duration: float, host_name: str | None = None) -> ClipPlan:
         _host = (host_name or "").strip()
-        import re as _re
-
-        def _slug(t: str) -> str:
-            s = _re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")
-            return s[:32] or "viral-hook"
-
         clips: list[dict] = []
         if duration >= 60:
             mid = duration / 2
@@ -175,14 +225,14 @@ class MuseClient:
             kw = "tips-tidur-nyenyak"
             clips.append({"start_time": 0.0, "end_time": min(60.0, duration), "hook_text": "Cara tidur nyenyak tanpa obat", "virality_score": 88, "seo_keyword": kw, "caption": f"{kw.replace('-',' ')} ini wajib coba malam ini", "hashtags": ["#tidurnyenyak", "#kesehatan", "#tipssehat"], "cta_text": "Save & Share ke yang butuh →"})
         else:
-            kw = _slug("Watch until the end")
+            kw = _slugify("Watch until the end")
             clips.append({"start_time": 0.0, "end_time": duration, "hook_text": "Watch until the end", "virality_score": 85, "seo_keyword": kw, "caption": f"{kw.replace('-',' ')} tonton sampai habis", "hashtags": ["#viral", "#fyp", "#tips"], "cta_text": "Save & Share →"})
             if duration < 15:
                 clips[0]["end_time"] = 15.0
                 clips[0]["start_time"] = 0.0
         for c in clips:
             if not c.get("seo_keyword"):
-                c["seo_keyword"] = _slug(c["hook_text"])
+                c["seo_keyword"] = _slugify(c["hook_text"])
             if not c.get("caption"):
                 c["caption"] = c["seo_keyword"].replace("-", " ") + " — tonton sampai akhir"
             if not c.get("hashtags"):
