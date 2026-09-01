@@ -12,14 +12,16 @@ class Settings(BaseSettings):
 
     # Groq
     groq_api_key: str = ""
-    groq_whisper_model: str = "whisper-large-v3"
-    # Free-tier tuning for podcast panjang (40+ chunks)
-    groq_chunk_seconds: int = 180  # 3 menit -> ~5.7 MB @16k mono, aman <25 MB
-    groq_rate_limit_per_minute: int = 10  # free tier: 10-20 RPM aman
+    groq_whisper_model: str = "whisper-large-v3-turbo"
+    # Free-tier tuning untuk podcast panjang (40+ chunks) — akal limit
+    groq_chunk_seconds: int = 300  # 5 menit -> ~9.5 MB @16k mono, hemat 42% req (19->11 untuk 57m). <25 MB aman
+    groq_rate_limit_per_minute: int = 10  # free tier: 10-20 RPM aman — worker concurrency 1 + jitter
     groq_max_retries: int = 5
     groq_retry_base_delay: float = 10.0  # detik, exponential 10,20,40...
     groq_max_file_mb: int = 25
     groq_concurrent_chunks: int = 1  # free tier: sekuensial, hemat kuota
+    groq_enable_cache: bool = True  # transcript JSON cache by audio sha (hemat re-clip)
+    groq_enable_local_fallback: bool = True  # 402/429 -> mock still returns words 2s-step so LLM still clips 55-90s
 
     # Muse Spark (OpenAI-compatible) — contributor tetap bisa, code fallback otomatis ke base untuk chat
     muse_api_key: str = ""
