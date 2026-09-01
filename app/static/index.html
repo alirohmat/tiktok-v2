@@ -252,12 +252,18 @@ function stopAllPolling(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null
 let manageSelDl=new Set(), manageSelRenders=new Set(); // filenames & job_id/filename
 function switchTab(which){
   const dl=$("#tab-dl"), cl=$("#tab-clip"), mg=$("#tab-manage"), bd=$("#tabBtnDl"), bc=$("#tabBtnClip"), bm=$("#tabBtnManage");
+  if(!dl||!cl||!mg) return;
   const tabActive="tab-active px-5 py-2 rounded-full border text-sm font-bold transition", tabIdle="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition";
   dl.classList.toggle("hidden", which!=='dl'); cl.classList.toggle("hidden", which!=='clip'); mg.classList.toggle("hidden", which!=='manage');
   bd.className=which==='dl'?tabActive:tabIdle; bc.className=which==='clip'?tabActive:tabIdle; bm.className=which==='manage'?tabActive:tabIdle;
-  if(which==='clip'){ refreshClipSources(); refreshClipJobs(); refreshRenders(); }
-  else if(which==='manage'){ refreshManage(); }
-  else { stopAllPolling(); if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) startPolling(); }
+  // persist tab
+  try{ localStorage.setItem("activeTab", which); }catch{}
+  // smart: only fetch for visible tab, no forced polling
+  if(which==='clip'){ refreshClipSources().catch(()=>{}); refreshClipJobs().catch(()=>{}); refreshRenders().catch(()=>{}); }
+  else if(which==='manage'){ refreshManage().catch(()=>{}); }
+  else { // dl tab — resume polling only if job running
+    if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) startPolling();
+  }
 }
 async function refreshManage(){ await Promise.all([refreshManageStats(), refreshManageLists()]); }
 async function refreshManageStats(){
@@ -513,7 +519,7 @@ async function refreshJobs(){
   finally{spinner.classList.add("hidden");}
 }
 async function showLogs(id){try{const r=await fetch(API+"/api/ytdlp/jobs/"+id);if(!r.ok) throw new Error("404");const j=await r.json();const job=j.job;logs.textContent=(job.logs||[]).join("\n")||"(log kosong)";document.getElementById("logsBody").classList.remove("hidden");logs.scrollTop=logs.scrollHeight;}catch{toast("Gagal ambil log",false);}}
-function startPolling(){refreshJobs();refreshFiles();refreshClipSources();if(pollTimer){clearInterval(pollTimer);pollTimer=null;}pollTimer=setInterval(async()=>{await refreshJobs();const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null; if(filesCache.length) await refreshFiles();}},1500);}
+function startPolling(){refreshJobs();if(pollTimer){clearInterval(pollTimer);pollTimer=null;}pollTimer=setInterval(async()=>{try{await refreshJobs();}catch{} const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null;}},3000);}
 // delegated clicks for jobs (avoid inline onclick breaking on ' " etc)
 document.getElementById("jobsList").addEventListener("click", e=>{
   const a=e.target.closest(".btn-logs"); if(a){showLogs(a.dataset.logs); return;}
@@ -671,13 +677,29 @@ $("#copyClipLogs").onclick=async()=>{
   catch{const ta=document.createElement("textarea");ta.value=clipLogsEl.textContent;document.body.appendChild(ta);ta.select();document.execCommand("copy");ta.remove();toast("Clip log disalin");}
 };
 $("#clearClipLogs").onclick=()=>{clipLogsEl.textContent="Log dibersihkan — job tetap berjalan di background";};
-// visibility: pause polling when hidden to save VPS
+// visibility: pause ALL polling when hidden to save VPS + data
 let bgPoll=null;
+function _clearBgPoll(){ if(bgPoll){clearInterval(bgPoll);bgPoll=null;} }
+function _startBgPoll(){
+  _clearBgPoll();
+  // only poll dl jobs when visible & has running job
+  bgPoll=setInterval(()=>{ if(document.hidden) return; const hasRun=jobsCache.some(j=>j.status==="downloading"||j.status==="queued"); if(hasRun){ refreshJobs().catch(()=>{}); } else { _clearBgPoll(); }},3000);
+}
 document.addEventListener("visibilitychange", ()=>{
-  if(document.hidden){ if(pollTimer) clearInterval(pollTimer); if(bgPoll) clearInterval(bgPoll);}
-  else { refreshJobs(); if(jobsCache.some(j=>j.status==="downloading")) startPolling(); bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) refreshJobs();},1500);}
+  if(document.hidden){
+    if(pollTimer) clearInterval(pollTimer);
+    if(clipPollTimer) clearInterval(clipPollTimer);
+    _clearBgPoll();
+  } else {
+    refreshJobs().catch(()=>{});
+    const hasDl=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");
+    if(hasDl) startPolling();
+    const hasClip=[...activeClipJobs].length>0 && document.querySelectorAll("#clipJobsList .progress-stripes").length>0;
+    if(hasClip && !clipPollTimer) startClipPolling();
+    _startBgPoll();
+  }
 });
-bgPoll=setInterval(()=>{if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) refreshJobs();},1500);
+_startBgPoll();
 // === KELOLA FILE handlers ===
 $("#refreshManage").onclick=refreshManage;
 $("#manageSelectAll").onclick=()=>{
@@ -756,6 +778,8 @@ $("#manageOlderBtn").onclick=async()=>{
 };
 
 loadHealth();loadDiagnostics();refreshJobs();refreshFiles();
+// restore saved tab (fix: tab nav terasa gak fungsi setelah refresh)
+try{ const savedTab=localStorage.getItem("activeTab"); if(savedTab && ["dl","clip","manage"].includes(savedTab) && savedTab!=="dl") switchTab(savedTab); }catch{}
 // wiring diagnostics
 document.getElementById("diagRefresh")?.addEventListener("click", ()=>{loadHealth();loadDiagnostics();toast("Diagnostics refreshed");});
 document.getElementById("diagCopy")?.addEventListener("click", async()=>{
