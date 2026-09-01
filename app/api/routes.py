@@ -657,3 +657,34 @@ def storage_stats():
         total_bytes += b
     out["total"] = {"files": total_files, "bytes": total_bytes, "human": f"{total_bytes/1024/1024:.2f} MB"}
     return {"ok": True, "stats": out, "storage_path": str(base)}
+
+
+@router.get("/clip/job-meta/{job_id}")
+def clip_job_meta(job_id: str):
+    """Meta SEO/CTA/engagement per job — untuk sinkron UI dengan patch 1-4."""
+    _validate_job_id(job_id)
+    import json as _json
+
+    settings = get_settings()
+    base = settings.storage_path / "renders" / job_id
+    _resolve_within_storage(base, settings.storage_path / "renders")
+    if not base.exists() or not base.is_dir():
+        raise HTTPException(status_code=404, detail="Job render tidak ditemukan")
+    # engagement.json
+    eng = None
+    engagement_path = base / "engagement.json"
+    if engagement_path.exists():
+        try:
+            eng = _json.loads(engagement_path.read_text(encoding="utf-8"))
+        except Exception:
+            eng = None
+    # caption sidecars *.txt
+    captions: dict[str, str] = {}
+    for p in base.glob("*.txt"):
+        try:
+            captions[p.name] = p.read_text(encoding="utf-8")[:2000]
+        except Exception:
+            continue
+    # list mp4 for reference
+    mp4s = [p.name for p in base.glob("*.mp4")]
+    return {"ok": True, "job_id": job_id, "engagement": eng, "captions": captions, "mp4s": mp4s}
