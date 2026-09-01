@@ -98,7 +98,7 @@ def transcribe_chunk(self: Task, chunk_path: str, start_time: float, chunk_index
 
 
 @celery_app.task(name="app.workers.tasks.extract_and_chunk")
-def extract_and_chunk(src_path: str, job_id: str) -> dict[str, Any]:
+def extract_and_chunk(src_path: str, job_id: str, host_name: str = "") -> dict[str, Any]:
     settings = get_settings()
     src = Path(src_path)
     storage = settings.storage_path
@@ -146,7 +146,7 @@ def extract_and_chunk(src_path: str, job_id: str) -> dict[str, Any]:
 
     total_duration = get_duration(effective_src)
     logger.info("Podcast chunked: %.1f menit -> %s chunk @%ss (free tier aman)", total_duration / 60, len(chunks), chunk_sec)
-    return {"job_id": job_id, "src": src_path, "effective_src": str(effective_src), "chunks": chunks, "total_duration": total_duration}
+    return {"job_id": job_id, "src": src_path, "effective_src": str(effective_src), "chunks": chunks, "total_duration": total_duration, "host_name": host_name}
 
 
 @celery_app.task(name="app.workers.tasks.stitch")
@@ -167,6 +167,7 @@ def stitch(results: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any
         "effective_src": meta.get("effective_src", meta["src"]),
         "transcript": transcript.model_dump(mode="json"),
         "total_duration": total_duration,
+        "host_name": meta.get("host_name", ""),
     }
 
 
@@ -176,12 +177,14 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
 
     transcript = Transcript.model_validate(data["transcript"])
     total_duration: float = data["total_duration"]
+    host_name = (data.get("host_name") or data.get("uploader") or "").strip()
     client = MuseClient()
-    plan = client.analyze(transcript, duration=total_duration)
+    plan = client.analyze(transcript, duration=total_duration, host_name=host_name or None)
     return {
         "job_id": data["job_id"],
         "src": data["src"],
         "effective_src": data.get("effective_src", data["src"]),
+        "host_name": host_name,
         "transcript": data["transcript"],
         "clip_plan": plan.model_dump(mode="json"),
         "total_duration": total_duration,
@@ -337,9 +340,9 @@ def run_pipeline_tail(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 @celery_app.task(name="app.workers.tasks.run_full_pipeline")
-def run_full_pipeline(src_path: str, job_id: str | None = None) -> dict[str, Any]:
+def run_full_pipeline(src_path: str, job_id: str | None = None, host_name: str = "") -> dict[str, Any]:
     """Synchronous full pipeline for FastAPI eager execution (no broker needed)."""
     if job_id is None:
         job_id = str(uuid.uuid4())
-    meta = extract_and_chunk(src_path, job_id)
+    meta = extract_and_chunk(src_path, job_id, host_name or "")
     return run_pipeline_tail(meta)

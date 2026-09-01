@@ -109,6 +109,9 @@ class ClipPlan(BaseModel):
     clips: list[Clip] = Field(min_length=1)
     dead_air: list[DeadAir] = Field(default_factory=list)
     broll_cues: list[BrollCue] = Field(default_factory=list)
+    # Host vs guest (NLP role-aware) — host jangan jadi hook tamu
+    host_name: str = Field(default="", description="channel owner / interviewer, jangan pakai untuk hook")
+    guest_names: list[str] = Field(default_factory=list, description="tamu yang diundang/diintroduksi, dipakai untuk hook trigger")
     # Engagement + niche (patch 3-4)
     engagement_comments: list[str] = Field(default_factory=list, description="3 polarizing prompts e.g. Menurut kalian settingan?")
     engagement_replies: list[str] = Field(default_factory=list, description="reply templates for 30-60min window")

@@ -101,6 +101,8 @@ You MUST return ONLY valid JSON, no markdown, no prose outside JSON. Exact schem
   ],
   "dead_air": [{"start": 12.1, "end": 12.8}],
   "broll_cues": [{"timestamp": 15.0, "keywords_en": "burning money", "fallback_en": "stressed office worker"}],
+  "host_name": "Deddy Corbuzier",
+  "guest_names": ["Prabowo Subianto"],
   "engagement_comments": ["Menurut kalian ini settingan atau real? Komen jujur", "Tim insomnia jam 2 pagi absen dulu 🙋", "Pernah coba cara ini? Share hasil kalian"],
   "engagement_replies": ["Setuju, aku juga mikir gitu — tapi coba detik 12 deh", "Wah relate banget, aku dulu gini juga"],
   "niche_tag": "kesehatan",
@@ -110,6 +112,7 @@ You MUST return ONLY valid JSON, no markdown, no prose outside JSON. Exact schem
 
 Rules:
 - clips: 55-90s preferred (monetization >60s Creator Rewards $40-100), min 15s max 90s. 1-5 most viral moments. Hooks, emotional peaks, controversial, surprising facts. Seamless loop: last sentence must grammatically connect to first hook sentence to boost rewatch 30-50%.
+- host_name: channel owner / interviewer — kamu akan diberi host_name di user prompt (dari ytdlp uploader). JANGAN pakai host untuk hook. guest_names: HANYA orang yang diundang/diintroduksi (trigger: "kedatangan", "bersama", "tamu", "menemui", "spesial", "datang"). Abaikan "saya". Hook/caption harus pakai guest_names jika ada: contoh "Prabowo bongkar ... — 3 detik ini gila" bukan "host bongkar...". Jika guest_names kosong, hook generic.
 - dead_air: leave empty [] — cut done deterministically by auto-editor PASS 1+2, not LLM.
 - broll_cues: 1-2 per clip, English 2-4 words cinematic. NEVER timestamp in 0-3s (hook protection).
 - hook_text: 5-12 words punchy for top-third y=80 0-3s. Must verbally contain seo_keyword words.

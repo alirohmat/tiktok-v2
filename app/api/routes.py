@@ -70,6 +70,7 @@ def _enforce_job_ttl(max_age_sec: float = 3600) -> None:
 class ClipFromFileRequest(BaseModel):
     filename: str = Field(min_length=1, description="Nama file di storage/downloads")
     job_id: str | None = None
+    host_name: str | None = None
 
 
 class ClipFromUrlRequest(BaseModel):
@@ -78,6 +79,7 @@ class ClipFromUrlRequest(BaseModel):
     format: str = Field(default="mp4")
     audio_only: bool = False
     no_playlist: bool = True
+    host_name: str | None = None
 
 
 # In-memory tracker for lean mode (tanpa redis) agar refresh tidak hilang + live logs
@@ -106,7 +108,7 @@ def _update_clip_job(job_id: str, **kw):
     else:
         CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status=kw.get("status","PENDING"), phase=kw.get("phase",""), progress=kw.get("progress",0.0), logs=list(CLIP_LOGS.get(job_id,[])), **{k:v for k,v in kw.items() if k not in ("status","phase","progress")})
 
-def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
+def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> JobStatus:
     """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking) dengan live logs detail."""
     settings = get_settings()
     _enforce_job_ttl()
@@ -140,7 +142,10 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
 
         _clip_log(job_id, "Redis terhubung — dispatch ke Celery worker (concurrency=2)")
         _clip_log(job_id, "Phase: queued -> worker akan update progress via backend")
-        run_full_pipeline.delay(str(src), job_id)  # type: ignore[attr-defined]
+        if host_name:
+            run_full_pipeline.delay(str(src), job_id, host_name)  # type: ignore[attr-defined]
+        else:
+            run_full_pipeline.delay(str(src), job_id)  # type: ignore[attr-defined]
         js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
         CLIP_JOBS[job_id] = js
         return js
@@ -157,7 +162,7 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
             _update_clip_job(job_id, status="STARTED", phase="extract", progress=0.05, started_at=_time.time())
             _clip_log(job_id, "Phase: extract audio (ffmpeg)")
             from app.workers.tasks import extract_and_chunk, run_pipeline_tail
-            meta = extract_and_chunk(str(src), job_id)
+            meta = extract_and_chunk(str(src), job_id, host_name or "")
             chunks = meta.get("chunks", [])
             total = meta.get("total_duration", 0)
             _clip_log(job_id, f"Audio extracted — chunked {len(chunks)} segment @180s (total {total/60:.1f} menit)")
@@ -341,11 +346,12 @@ def clip_from_download(body: ClipFromFileRequest) -> JobStatus:
         if body.job_id in CLIP_JOBS:
             raise HTTPException(status_code=409, detail=f"job_id {body.job_id} sudah dipakai")
     job_id = body.job_id or str(uuid.uuid4())
-    return _run_clip_pipeline(src, job_id)
+    host = (body.host_name or "").strip() or None
+    return _run_clip_pipeline(src, job_id, host)
 
 
 @router.post("/clip/from-ytdlp-job", response_model=JobStatus)
-def clip_from_ytdlp_job(job_id: str) -> JobStatus:
+def clip_from_ytdlp_job(job_id: str, host_name: str | None = None) -> JobStatus:
     """Ambil hasil download job ytdlp yang sudah completed lalu clip."""
     from app.services.ytdlp_service import JOBS
     _validate_job_id(job_id)
@@ -362,7 +368,8 @@ def clip_from_ytdlp_job(job_id: str) -> JobStatus:
     if not src.exists():
         raise HTTPException(status_code=404, detail="File hasil download tidak ditemukan di disk")
     clip_job_id = str(uuid.uuid4())
-    return _run_clip_pipeline(src, clip_job_id)
+    host = (host_name or "").strip() or None
+    return _run_clip_pipeline(src, clip_job_id, host)
 
 
 @router.post("/clip/from-url", response_model=JobStatus)
@@ -376,6 +383,8 @@ async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobSta
     ytdlp_job = create_job(body.url, {"quality": body.quality, "format": body.format, "audio_only": body.audio_only, "no_playlist": body.no_playlist})
     clip_job_id = str(uuid.uuid4())
 
+    _host = (body.host_name or "").strip() or None
+
     def _download_then_clip_sync():
         import asyncio as _asyncio
         try:
@@ -383,7 +392,9 @@ async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobSta
             if ytdlp_job.status == "completed" and ytdlp_job.filepath:
                 src = Path(ytdlp_job.filepath)
                 if src.exists():
-                    _run_clip_pipeline(src, clip_job_id)
+                    # auto host dari ytdlp uploader jika tidak dikirim manual
+                    h = _host or getattr(ytdlp_job, "uploader", None) or getattr(ytdlp_job, "channel", None) or ""
+                    _run_clip_pipeline(src, clip_job_id, (h or "").strip() or None)
         except Exception as e:
             ytdlp_job.status = "error"
             ytdlp_job.error = str(e)
