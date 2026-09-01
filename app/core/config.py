@@ -21,10 +21,10 @@ class Settings(BaseSettings):
     groq_max_file_mb: int = 25
     groq_concurrent_chunks: int = 1  # free tier: sekuensial, hemat kuota
 
-    # Muse Spark (OpenAI-compatible) — api.meta.ai chat hanya support muse-spark-1.2 / 1.1
+    # Muse Spark (OpenAI-compatible) — contributor tetap bisa, code fallback otomatis ke base untuk chat
     muse_api_key: str = ""
     muse_base_url: str = "https://api.meta.ai/v1"
-    muse_model: str = "muse-spark-1.2"
+    muse_model: str = "muse-spark-1.2-contributor"
 
     # Coverr
     coverr_api_key: str = ""

@@ -81,9 +81,9 @@ class MuseClient:
         from openai import OpenAI  # type: ignore[import-untyped]
 
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        try:
-            response = client.chat.completions.create(
-                model=self.model,
+        def _try_create(m):
+            return client.chat.completions.create(
+                model=m,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
@@ -91,23 +91,43 @@ class MuseClient:
                 temperature=0.2,
                 response_format={"type": "json_object"},
             )
+
+        try:
+            response = _try_create(self.model)
         except Exception as e:
             msg = str(e)
-            # 404 model_not_found -> beri pesan jelas + fallback ke mock agar clip tidak FAILURE
+            # 404 model_not_found -> coba fallback: contributor -> base model
             if "404" in msg or "model_not_found" in msg or "NotFoundError" in type(e).__name__:
                 import logging
-                logging.getLogger(__name__).warning(
-                    "Muse model %r tidak ditemukan di %s (404). Cek MUSE_MODEL & MUSE_BASE_URL. Fallback ke mock plan agar clip tetap jalan. Error: %s",
-                    self.model, self.base_url, e,
-                )
-                # fallback ke mock agar pipeline tetap lanjut (anti menggantung)
-                return self._mock_plan(dur)
-            # auth / rate limit juga fallback agar tidak FAILURE total
-            if "401" in msg or "403" in msg or "429" in msg:
+                # auto-fallback: muse-spark-1.2-contributor(-free) -> muse-spark-1.2 (yang support chat)
+                alt = self.model
+                for suffix in ("-contributor-free", "-contributor", "-free"):
+                    if alt.endswith(suffix):
+                        alt = alt[: -len(suffix)]
+                        break
+                if alt != self.model:
+                    try:
+                        logging.getLogger(__name__).warning(
+                            "Muse model %r 404, coba fallback ke %r (tetap pakai key contributor)", self.model, alt
+                        )
+                        response = _try_create(alt)
+                    except Exception as e2:
+                        logging.getLogger(__name__).warning(
+                            "Fallback model %r juga 404 (%s), fallback ke mock. Error: %s", alt, e2, e
+                        )
+                        return self._mock_plan(dur)
+                else:
+                    logging.getLogger(__name__).warning(
+                        "Muse model %r tidak ditemukan di %s (404). Cek MUSE_MODEL & MUSE_BASE_URL. Fallback ke mock plan agar clip tetap jalan. Error: %s",
+                        self.model, self.base_url, e,
+                    )
+                    return self._mock_plan(dur)
+            elif "401" in msg or "403" in msg or "429" in msg:
                 import logging
                 logging.getLogger(__name__).warning("Muse API auth/rate error (%s), fallback mock: %s", type(e).__name__, e)
                 return self._mock_plan(dur)
-            raise
+            else:
+                raise
         raw = response.choices[0].message.content or ""
         return self._parse_and_validate(raw, dur, client, user_prompt)
 
