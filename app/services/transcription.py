@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import threading
 import time
 import logging
 from app.core.config import get_settings
@@ -14,21 +15,31 @@ logger = logging.getLogger(__name__)
 
 # Global token-bucket untuk free tier: jaga jarak antar request
 _last_groq_call: float = 0.0
+_groq_lock = threading.Lock()
 
 
 def _groq_throttle() -> None:
-    """Jaga jarak antar call sesuai groq_rate_limit_per_minute (podcast 40 chunk)."""
+    """Jaga jarak antar call sesuai groq_rate_limit_per_minute (podcast 40 chunk). Thread-safe.
+    Sleep dilakukan TANPA hold lock agar tidak blokir 6s concurrent thread.
+    """
     global _last_groq_call
     settings = get_settings()
     rpm = max(1, settings.groq_rate_limit_per_minute)
     min_interval = 60.0 / rpm
-    # di eager mode (1 worker) tetap throttle; di Celery rate_limit juga jaga
-    elapsed = time.time() - _last_groq_call
-    if elapsed < min_interval:
-        sleep_for = min_interval - elapsed
-        # jangan sleep di mock (tanpa key) terlalu lama, tapi tetap hormati
+    sleep_for = 0.0
+    with _groq_lock:
+        elapsed = time.time() - _last_groq_call
+        if elapsed < min_interval:
+            sleep_for = min_interval - elapsed
+        else:
+            # No need to sleep, claim slot immediately
+            _last_groq_call = time.time()
+            return
+    # Sleep outside lock
+    if sleep_for > 0:
         time.sleep(sleep_for)
-    _last_groq_call = time.time()
+    with _groq_lock:
+        _last_groq_call = time.time()
 
 
 def _extract_retry_after(exc: Exception) -> float | None:
@@ -121,18 +132,31 @@ def transcribe_file_groq(
             except FileNotFoundError:
                 pass
 
-            # Real Groq call
+            # Real Groq call — unified handling, chunk <25 MB already checked
             try:
                 from groq import Groq  # type: ignore[import-untyped]
 
                 client = Groq(api_key=key)
                 with open(chunk_path, "rb") as f:
-                    transcription = client.audio.transcriptions.create(
-                        file=(chunk_path.name, f.read()),
-                        model=mdl,
-                        response_format="verbose_json",  # type: ignore[arg-type]
-                        timestamp_granularities=["word"],  # type: ignore[arg-type]
-                    )
+                    # Groq SDK expects (filename, bytes); use bytes to avoid handle closed issue
+                    file_tuple = (chunk_path.name, f.read())
+                    try:
+                        transcription = client.audio.transcriptions.create(
+                            file=file_tuple,
+                            model=mdl,
+                            response_format="verbose_json",  # type: ignore[arg-type]
+                            timestamp_granularities=["word"],  # type: ignore[arg-type]
+                        )
+                    except TypeError as te:
+                        # fallback if timestamp_granularities unsupported in this Groq version
+                        if "timestamp_granularities" in str(te):
+                            transcription = client.audio.transcriptions.create(
+                                file=file_tuple,
+                                model=mdl,
+                                response_format="verbose_json",  # type: ignore[arg-type]
+                            )
+                        else:
+                            raise
                 if isinstance(transcription, dict):
                     return transcription
                 if hasattr(transcription, "model_dump"):
@@ -145,12 +169,23 @@ def transcribe_file_groq(
 
                 client = OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
                 with open(chunk_path, "rb") as f:
-                    transcription = client.audio.transcriptions.create(
-                        file=f,
-                        model=mdl,
-                        response_format="verbose_json",
-                        timestamp_granularities=["word"],  # type: ignore[arg-type]
-                    )
+                    file_tuple = (chunk_path.name, f.read())
+                    try:
+                        transcription = client.audio.transcriptions.create(
+                            file=file_tuple,
+                            model=mdl,
+                            response_format="verbose_json",
+                            timestamp_granularities=["word"],  # type: ignore[arg-type]
+                        )
+                    except TypeError as te:
+                        if "timestamp_granularities" in str(te):
+                            transcription = client.audio.transcriptions.create(
+                                file=file_tuple,
+                                model=mdl,
+                                response_format="verbose_json",
+                            )
+                        else:
+                            raise
                 if isinstance(transcription, dict):
                     return transcription
                 if hasattr(transcription, "model_dump"):
@@ -194,6 +229,7 @@ def stitch_transcripts(
     """
     Stitch chunk results with offset correction.
     Each chunk's words have local 0..chunk_duration timestamps; add chunk.start_time.
+    Dedup overlap if overlap_sec >0 (future-proof).
     """
     all_words: list[Word] = []
     all_segments: list[Segment] = []
@@ -221,8 +257,14 @@ def stitch_transcripts(
             except Exception:
                 continue
 
-    # Sort by start
+    # Sort by start and dedup overlap (exact duplicate words due to overlap_sec)
     all_words.sort(key=lambda x: x.start)
+    deduped: list[Word] = []
+    for w in all_words:
+        if deduped and abs(w.start - deduped[-1].start) < 0.01 and w.word == deduped[-1].word:
+            continue
+        deduped.append(w)
+    all_words = deduped
     all_segments.sort(key=lambda x: x.start)
 
     # Validate monotonic (allow small overlap)

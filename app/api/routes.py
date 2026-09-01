@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,56 @@ from app.core.config import get_settings
 from app.models.schemas import JobStatus
 
 router = APIRouter()
+
+# --- Security constants ---
+_JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,}$")
+_FILENAME_RE = re.compile(r"^[^/\\]+$")
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
+CHUNK_SIZE = 1024 * 1024  # 1 MB streaming
+
+
+def _validate_job_id(job_id: str) -> None:
+    if not _JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=400, detail="job_id tidak valid (harus hex/uuid, min 8 char)")
+
+
+def _is_within(child: Path, parent: Path) -> bool:
+    """Safe check via is_relative_to — prevents /storage vs /storage_evil bypass."""
+    try:
+        # Python 3.9+ has is_relative_to; fallback to relative_to try
+        return child.resolve().is_relative_to(parent.resolve())
+    except AttributeError:
+        try:
+            child.resolve().relative_to(parent.resolve())
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
+def _resolve_within_storage(path: Path, storage_root: Path) -> Path:
+    try:
+        resolved = path.resolve()
+        storage_resolved = storage_root.resolve()
+        if not _is_within(resolved, storage_resolved):
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+        return resolved
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Path tidak valid")
+
+
+def _enforce_job_ttl(max_age_sec: float = 3600) -> None:
+    """Evict stale CLIP_JOBS / CLIP_LOGS to avoid unbounded memory (TTL)."""
+    now = _time.time()
+    stale = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > max_age_sec and js.status in ("PENDING", "STARTED", "PROCESSING")]
+    # Do not auto-evict SUCCESS/FAILURE quickly; keep 24h
+    old = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > 86400]
+    for jid in set(stale + old):
+        CLIP_JOBS.pop(jid, None)
+        CLIP_LOGS.pop(jid, None)
 
 
 class ClipFromFileRequest(BaseModel):
@@ -58,6 +109,25 @@ def _update_clip_job(job_id: str, **kw):
 def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
     """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking) dengan live logs detail."""
     settings = get_settings()
+    _enforce_job_ttl()
+    try:
+        from app.services.ytdlp_service import _check_storage_quotas
+        qerr = _check_storage_quotas()
+        if qerr:
+            # allow clip but warn via logs; block only if renders quota exceeded (>5GB)
+            renders = settings.storage_path / "renders"
+            # strict block for renders/uploads exceeding
+            if "renders" in qerr or "uploads" in qerr:
+                raise HTTPException(status_code=507, detail=qerr)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    # Validate src is within storage
+    _resolve_within_storage(src, settings.storage_path)
+    _validate_job_id(job_id)
+    if job_id in CLIP_JOBS and CLIP_JOBS[job_id].status in ("PENDING", "STARTED", "PROCESSING"):
+        raise HTTPException(status_code=409, detail=f"job_id {job_id} sudah dipakai (status {CLIP_JOBS[job_id].status})")
     CLIP_LOGS[job_id] = []
     _clip_log(job_id, f"Queued: {src.name}")
     # Try Celery async (redis tersedia)
@@ -74,6 +144,8 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
         js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
         CLIP_JOBS[job_id] = js
         return js
+    except HTTPException:
+        raise
     except Exception as e:
         _clip_log(job_id, f"Redis tidak tersedia ({e}) — fallback eager thread (lean mode)")
 
@@ -109,7 +181,8 @@ def _run_clip_pipeline(src: Path, job_id: str) -> JobStatus:
             CLIP_LOGS[job_id].append(err)
 
     CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
-    threading.Thread(target=_bg, daemon=True).start()
+    # Use non-daemon thread so shutdown waits for cleanup; no orphan kill
+    threading.Thread(target=_bg, daemon=False).start()
     return CLIP_JOBS[job_id]
 
 
@@ -135,26 +208,62 @@ def health() -> dict[str, str]:
 
 
 @router.post("/clip", response_model=JobStatus)
-async def clip_video(file: UploadFile = File(...)) -> JobStatus:
+async def clip_video(request: Request, file: UploadFile = File(...)) -> JobStatus:
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file provided")
     ext = Path(file.filename).suffix.lower()
     if ext not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
         raise HTTPException(status_code=400, detail=f"Unsupported format {ext}")
 
+    # Enforce Content-Length early if provided
+    clen = request.headers.get("content-length")
+    if clen:
+        try:
+            if int(clen) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail=f"File terlalu besar (max {MAX_UPLOAD_BYTES//1024//1024} MB)")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
     settings = get_settings()
+    # Quota check renders/uploads/cache/previews before accepting upload
+    try:
+        from app.services.ytdlp_service import _check_storage_quotas
+        qerr = _check_storage_quotas()
+        if qerr:
+            raise HTTPException(status_code=507, detail=qerr)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     job_id = str(uuid.uuid4())
     uploads = settings.storage_path / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     dest = uploads / f"{job_id}{ext}"
-    content = await file.read()
-    dest.write_bytes(content)
+    # Stream write with limit to avoid OOM
+    total = 0
+    with open(dest, "wb") as out:
+        while True:
+            chunk = await file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                out.close()
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+                raise HTTPException(status_code=413, detail=f"File terlalu besar (max {MAX_UPLOAD_BYTES//1024//1024} MB)")
+            out.write(chunk)
 
     return _run_clip_pipeline(dest, job_id)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 def get_job(job_id: str) -> JobStatus:
+    _validate_job_id(job_id)
     # 1) Cek in-memory CLIP_JOBS (lean mode non-blocking, persist refresh) — sertakan live logs
     if job_id in CLIP_JOBS:
         # Jika sudah SUCCESS di memory tapi renders belum ke-detect, sinkronkan
@@ -205,14 +314,32 @@ def clip_from_download(body: ClipFromFileRequest) -> JobStatus:
     """Clip sumber utama ytdlp: ambil file dari storage/downloads lalu jalankan DNA Engine."""
     from app.services.ytdlp_service import get_download_dir
 
+    _enforce_job_ttl()
     if "/" in body.filename or "\\" in body.filename or ".." in body.filename:
         raise HTTPException(status_code=400, detail="Nama file tidak valid")
-    src = get_download_dir() / body.filename
+    if not _FILENAME_RE.match(body.filename):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    download_dir = get_download_dir()
+    src = download_dir / body.filename
+    # Resolve must stay within downloads — is_relative_to prevents storage_evil
+    _resolve_within_storage(src, download_dir)
+    # Flat downloads: ensure direct parent is download_dir
+    try:
+        if src.resolve().parent != download_dir.resolve():
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Path tidak valid")
     if not src.exists() or not src.is_file():
         raise HTTPException(status_code=404, detail=f"File {body.filename} tidak ditemukan di downloads")
     # Validasi ekstensi video
     if src.suffix.lower() not in {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v", ".mp3", ".m4a", ".opus", ".wav"}:
         raise HTTPException(status_code=400, detail=f"Format {src.suffix} tidak didukung untuk clipping")
+    if body.job_id:
+        _validate_job_id(body.job_id)
+        if body.job_id in CLIP_JOBS:
+            raise HTTPException(status_code=409, detail=f"job_id {body.job_id} sudah dipakai")
     job_id = body.job_id or str(uuid.uuid4())
     return _run_clip_pipeline(src, job_id)
 
@@ -221,6 +348,7 @@ def clip_from_download(body: ClipFromFileRequest) -> JobStatus:
 def clip_from_ytdlp_job(job_id: str) -> JobStatus:
     """Ambil hasil download job ytdlp yang sudah completed lalu clip."""
     from app.services.ytdlp_service import JOBS
+    _validate_job_id(job_id)
 
     job = JOBS.get(job_id)
     if not job:
@@ -228,6 +356,9 @@ def clip_from_ytdlp_job(job_id: str) -> JobStatus:
     if job.status != "completed" or not job.filepath:
         raise HTTPException(status_code=400, detail=f"Job belum selesai (status={job.status})")
     src = Path(job.filepath)
+    # Validate src still within storage/downloads
+    from app.services.ytdlp_service import get_download_dir
+    _resolve_within_storage(src, get_download_dir())
     if not src.exists():
         raise HTTPException(status_code=404, detail="File hasil download tidak ditemukan di disk")
     clip_job_id = str(uuid.uuid4())
@@ -237,9 +368,7 @@ def clip_from_ytdlp_job(job_id: str) -> JobStatus:
 @router.post("/clip/from-url", response_model=JobStatus)
 async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobStatus:
     """One-click: ytdlp download URL lalu langsung clip (sumber utama ytdlp)."""
-    import asyncio
-
-    from app.services.ytdlp_service import JOBS, create_job, run_download_job
+    from app.services.ytdlp_service import create_job, run_download_job
 
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL harus diawali http:// atau https://")
@@ -247,9 +376,10 @@ async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobSta
     ytdlp_job = create_job(body.url, {"quality": body.quality, "format": body.format, "audio_only": body.audio_only, "no_playlist": body.no_playlist})
     clip_job_id = str(uuid.uuid4())
 
-    async def _download_then_clip():
+    def _download_then_clip_sync():
+        import asyncio as _asyncio
         try:
-            await run_download_job(ytdlp_job)
+            _asyncio.run(run_download_job(ytdlp_job))
             if ytdlp_job.status == "completed" and ytdlp_job.filepath:
                 src = Path(ytdlp_job.filepath)
                 if src.exists():
@@ -258,7 +388,11 @@ async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobSta
             ytdlp_job.status = "error"
             ytdlp_job.error = str(e)
 
-    asyncio.create_task(_download_then_clip())
+    # Use BackgroundTasks so task survives event loop restart / worker reload
+    bg.add_task(_download_then_clip_sync)
+    # Pre-register clip job as PENDING for polling
+    CLIP_JOBS[clip_job_id] = JobStatus(job_id=clip_job_id, status="PENDING", phase="downloading", progress=0.0, started_at=_time.time())
+    CLIP_LOGS[clip_job_id] = [f"[{_time.strftime('%H:%M:%S')}] Download queued: {ytdlp_job.job_id} -> clip {clip_job_id}"]
     # Return clip job id segera; frontend polling /jobs/{clip_job_id} dan /api/ytdlp/jobs/{ytdlp_job.job_id}
     return JobStatus(job_id=clip_job_id, status="PENDING", phase="downloading", progress=0.0)
 
@@ -311,7 +445,7 @@ def clip_jobs() -> dict:
     # 1) renders (selesai)
     if renders_dir.exists():
         for d in renders_dir.iterdir():
-            if d.is_dir() and (d / f"{d.name}.mp4").exists() or list(d.glob("*.mp4")):
+            if d.is_dir() and ((d / f"{d.name}.mp4").exists() or list(d.glob("*.mp4"))):
                 clips = [p.name for p in d.glob("*.mp4")]
                 if clips:
                     jobs.append({"job_id": d.name, "status": "SUCCESS", "files": clips})
@@ -333,8 +467,23 @@ def clip_jobs() -> dict:
 
 @router.get("/renders/{job_id}/{filename}")
 def get_render(job_id: str, filename: str) -> FileResponse:
+    _validate_job_id(job_id)
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    if not _FILENAME_RE.match(filename):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
     settings = get_settings()
-    path = settings.storage_path / "renders" / job_id / filename
-    if not path.exists():
+    # Validate must be within renders/job_id — is_relative_to safe
+    base = settings.storage_path / "renders" / job_id
+    path = base / filename
+    _resolve_within_storage(path, settings.storage_path / "renders")
+    try:
+        if path.resolve().parent != base.resolve():
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Path tidak valid")
+    if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(path, media_type="video/mp4", filename=filename)

@@ -19,6 +19,33 @@ except ImportError:
         return None
 
 
+def _escape_drawtext(text: str) -> str:
+    r"""Escape drawtext text for filter_complex: \ : ' % [ ] ;"""
+    # Order matters: escape \ first
+    t = text.replace("\\", "\\\\")
+    t = t.replace(":", "\\:")
+    t = t.replace("'", "\\'")
+    t = t.replace("%", "\\%")
+    t = t.replace("[", "\\[")
+    t = t.replace("]", "\\]")
+    t = t.replace(";", "\\;")
+    t = t.replace("\n", " ")
+    # Remove double quotes and control chars
+    t = t.replace('"', "")
+    return t
+
+
+def _fontfile_arg() -> str:
+    cand = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+    if cand.exists():
+        return f":fontfile={cand}"
+    # fallback try other common
+    for p in [Path("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"), Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf")]:
+        if p.exists():
+            return f":fontfile={p}"
+    return ""
+
+
 def random_creation_time() -> str:
     base = datetime(2023, 1, 1, tzinfo=timezone.utc)
     delta = timedelta(days=random.randint(0, 700), seconds=random.randint(0, 86400))
@@ -106,27 +133,20 @@ class FFmpegBuilder:
         v_label = next_v
         next_v = f"v{len(filter_parts)}"
 
-        # Visual fingerprint: slow 5% dynamic zoom
+        # Visual fingerprint: slow 5% dynamic zoom — smooth via zoompan
         if self.enable_zoompan:
-            # zoompan filter: d=1 duration each frame, z increment slowly to 1.05
-            # Note: zoompan requires prior scale; we use zoompan on scaled frame
-            # Using scale+zoompan: alternative is to use zoompan directly
+            # Use zoompan with d=1 and small increment; feed fps 30 Ensures smoothness.
+            # Use pzoom to avoid initial jump, max 1.08 (~8% over ~50 frames * 0.0015)
             filter_parts.append(
-                f"[{v_label}]zoompan=d=1:s=720x1280:fps=30:z='min(zoom+0.0015,1.05)'[{next_v}];"
+                f"[{v_label}]zoompan=z='min(pzoom+0.0015\\,1.08)':d=1:s=720x1280:fps=30[{next_v}];"
             )
             v_label = next_v
             next_v = f"v{len(filter_parts)}"
 
-        # Transparent noise every 7 seconds (210 frames at 30fps)
+        # Subtle noise: visible but not intrusive — apply noise for 3 frames every ~2 sec (60 frames)
         if self.enable_noise:
-            # Use noise filter with enable expression: add very low opacity noise periodically
-            # tblend or noise: we use "noise=alls=10:allf=t:enable='eq(mod(n,210),0)'" blended
-            # Simpler: use eq and noise via select blending - approximate with noise alpha
-            # For compatibility, use "noise=alls=6:allf=t:enable='eq(mod(n\\,210),0)'" would inject noise frame
-            # We'll use split + overlay noise: generate noise source via color+noise
-            # Simpler approach: use "noise" with temporal enable
             filter_parts.append(
-                f"[{v_label}]noise=alls=8:allf=t:enable='eq(mod(n,210),0)'[{next_v}];"
+                f"[{v_label}]noise=alls=6:allf=t:enable='between(mod(n\\,60)\\,0\\,3)'[{next_v}];"
             )
             v_label = next_v
             next_v = f"v{len(filter_parts)}"
@@ -160,11 +180,10 @@ class FFmpegBuilder:
         # Kinetic typography: drawtext for hook in first 3 seconds
         # If transcript + hook provided, generate per-word drawtext or simple hook
         if hook_text:
-            # Single drawtext for hook duration 0-3s (word-by-word would require ASS)
-            # Use hook_text split; for MVP single centered text
-            safe_hook = hook_text.replace(":", "\\:").replace("'", "").replace('"', "")
+            safe_hook = _escape_drawtext(hook_text)
+            ff = _fontfile_arg()
             filter_parts.append(
-                f"[{v_label}]drawtext=text='{safe_hook}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h-220:enable='between(t,0,3)'[{next_v}];"
+                f"[{v_label}]drawtext=text='{safe_hook}'{ff}:fontcolor=white:fontsize=48:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-text_w)/2:y=h-220:enable='between(t,0,3)'[{next_v}];"
             )
             # Also add per-word kinetic if transcript available (approximate split)
             if self.transcript and self.transcript.words:

@@ -4,7 +4,9 @@ import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+import re as _re
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -16,6 +18,22 @@ from app.services.ytdlp_service import (
     list_downloaded_files,
     run_download_job,
 )
+
+_JOB_RE = _re.compile(r"^[a-f0-9]{12}$")
+_FILENAME_RE = _re.compile(r"^[^/\\]+$")
+
+
+def _is_within(child: Path, parent: Path) -> bool:
+    try:
+        return child.resolve().is_relative_to(parent.resolve())
+    except AttributeError:
+        try:
+            child.resolve().relative_to(parent.resolve())
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
 
 router = APIRouter(prefix="/api/ytdlp", tags=["ytdlp"])
 
@@ -54,6 +72,11 @@ async def ytdlp_download(body: DownloadRequest, bg: BackgroundTasks):
     if not body.url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="URL harus diawali http:// atau https://")
 
+    # Simple rate-limit guard: reject if too many active jobs (>20 pending/downloading)
+    active = sum(1 for j in JOBS.values() if j.status in ("queued", "downloading"))
+    if active > 20:
+        raise HTTPException(status_code=429, detail="Terlalu banyak download aktif, coba lagi nanti")
+
     options = {
         "quality": body.quality,
         "format": body.format,
@@ -65,15 +88,16 @@ async def ytdlp_download(body: DownloadRequest, bg: BackgroundTasks):
     }
     job = create_job(body.url, options)
 
-    # Launch async task via asyncio.create_task (more reliable than BackgroundTasks for long running)
-    async def _runner():
+    def _runner_sync():
+        import asyncio as _asyncio
         try:
-            await run_download_job(job)
+            _asyncio.run(run_download_job(job))
         except Exception as e:
             job.status = "error"
             job.error = str(e)
 
-    asyncio.create_task(_runner())
+    # Use BackgroundTasks for persistence across event loop reload
+    bg.add_task(_runner_sync)
 
     return {"ok": True, "job_id": job.job_id, "status": job.status}
 
@@ -105,6 +129,8 @@ def list_jobs():
 
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str):
+    if not _JOB_RE.match(job_id):
+        raise HTTPException(status_code=400, detail="job_id tidak valid")
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
@@ -131,6 +157,8 @@ def get_job(job_id: str):
 
 @router.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
+    if not _JOB_RE.match(job_id):
+        raise HTTPException(status_code=400, detail="job_id tidak valid")
     job = JOBS.pop(job_id, None)
     if not job:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
@@ -154,7 +182,19 @@ def download_file(name: str):
     # name is filename, prevent path traversal
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Nama file tidak valid")
-    p = get_download_dir() / name
+    if not _FILENAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    dl_dir = get_download_dir()
+    p = dl_dir / name
+    if not _is_within(p, dl_dir):
+        raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    try:
+        if p.resolve().parent != dl_dir.resolve():
+            raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="File tidak ditemukan")
     # Guess media type
@@ -165,7 +205,16 @@ def download_file(name: str):
 def delete_file(name: str):
     if "/" in name or "\\" in name or ".." in name:
         raise HTTPException(status_code=400, detail="Nama file tidak valid")
-    p = get_download_dir() / name
+    if not _FILENAME_RE.match(name):
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
+    dl_dir = get_download_dir()
+    p = dl_dir / name
+    if not _is_within(p, dl_dir):
+        raise HTTPException(status_code=400, detail="Path traversal terdeteksi")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Nama file tidak valid")
     if not p.exists():
         raise HTTPException(status_code=404, detail="File tidak ditemukan")
     try:

@@ -217,11 +217,8 @@ def render_clips(data: dict[str, Any]) -> dict[str, Any]:
     job_id: str = data["job_id"]
 
     settings = get_settings()
-    music_path = Path(settings.music_path) if settings.music_path else None
-    if music_path and not music_path.is_absolute():
-        music_path = Path(__file__).parent.parent.parent / music_path
-    if music_path and not music_path.exists():
-        music_path = None
+    # Use resolved_music_path helper (checks project root and storage)
+    music_path = settings.resolved_music_path
 
     output_dir = settings.storage_path / "renders" / job_id
     engine = RenderEngine(music_path=music_path)

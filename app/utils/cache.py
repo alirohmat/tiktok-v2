@@ -10,8 +10,11 @@ class CoverrCache:
     def __init__(self, db_path: Path, ttl: int = 86400) -> None:
         self.db_path = db_path
         self.ttl = ttl
+        self._inited = False
 
     async def init(self) -> None:
+        if self._inited and self.db_path.exists():
+            return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -27,6 +30,7 @@ class CoverrCache:
                 """
             )
             await db.commit()
+        self._inited = True
 
     async def get(self, keyword: str) -> dict | None:
         async with aiosqlite.connect(self.db_path) as db:
@@ -38,7 +42,7 @@ class CoverrCache:
                 if row is None:
                     return None
                 created = row["created_at"]
-                if int(time.time()) - created > self.ttl:
+                if time.time() - float(created) > self.ttl:
                     # expired
                     await db.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
                     await db.commit()
@@ -79,7 +83,7 @@ class CoverrCache:
         if row is None:
             return None
         created = row["created_at"]  # type: ignore[index]
-        if int(time.time()) - created > self.ttl:
+        if time.time() - float(created) > self.ttl:
             conn2 = sqlite3.connect(self.db_path)
             conn2.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
             conn2.commit()

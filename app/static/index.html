@@ -193,7 +193,7 @@ Contoh: [14:22:10] Queued: video.mp4
 <p class="text-xs font-mono bg-zinc-950 border border-zinc-800 rounded-lg p-3">GET /clip/sources • POST /clip/from-download • POST /clip/from-url • GET /jobs/{id} • GET /clip/renders</p></div><form method="dialog" class="mt-5 text-right"><button class="px-4 py-2 rounded-xl bg-brand-600 font-semibold">Tutup</button></form></div></dialog>
 
 <script>
-const API="";
+const API=(document.querySelector('meta[name=\"api-base\"]')?.content || "").replace(/\/$/,"");
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const urlInput=$("#urlInput"), fetchBtn=$("#fetchBtn"), downloadBtn=$("#downloadBtn"), urlError=$("#urlError"), logs=$("#logs");
 let currentInfo=null, pollTimer=null, clipPollTimer=null, jobsCache=[], filesCache=[];
@@ -202,10 +202,11 @@ function toast(m,ok=true){const t=$("#toast");t.textContent=m;t.className="fixed
 function fmtBytes(n){if(n==null)return "—";if(n<1024)return n+" B";if(n<1024*1024)return (n/1024).toFixed(1)+" KB";return (n/1024/1024).toFixed(2)+" MB";}
 function fmtViews(n){if(!n)return "—";if(n>1e6)return (n/1e6).toFixed(1)+"M";if(n>1e3)return (n/1e3).toFixed(1)+"K";return String(n);}
 function fmtDur(s){if(!s&&s!==0)return "—";const m=Math.floor(s/60),sec=Math.floor(s%60);return m+":"+String(sec).padStart(2,"0");}
+function stopAllPolling(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} if(clipPollTimer){clearInterval(clipPollTimer);clipPollTimer=null;} }
 function switchTab(which){
   const dl=$("#tab-dl"), cl=$("#tab-clip"), bd=$("#tabBtnDl"), bc=$("#tabBtnClip");
   if(which==='clip'){dl.classList.add("hidden");cl.classList.remove("hidden");bc.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bd.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition"; refreshClipSources(); refreshClipJobs(); refreshRenders();}
-  else{cl.classList.add("hidden");dl.classList.remove("hidden");bd.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bc.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition";}
+  else{cl.classList.add("hidden");dl.classList.remove("hidden");bd.className="tab-active px-5 py-2 rounded-full border text-sm font-bold transition";bc.className="px-5 py-2 rounded-full border border-zinc-800 bg-zinc-900 text-sm font-bold hover:bg-zinc-800 transition"; stopAllPolling(); if(jobsCache.some(j=>j.status==="downloading"||j.status==="queued")) startPolling(); }
 }
 async function loadHealth(){
   const dot=$("#healthDot"), txt=$("#healthText");
@@ -346,7 +347,7 @@ async function refreshJobs(){
   finally{spinner.classList.add("hidden");}
 }
 async function showLogs(id){try{const r=await fetch(API+"/api/ytdlp/jobs/"+id);if(!r.ok) throw new Error("404");const j=await r.json();const job=j.job;logs.textContent=(job.logs||[]).join("\n")||"(log kosong)";document.getElementById("logsBody").classList.remove("hidden");logs.scrollTop=logs.scrollHeight;}catch{toast("Gagal ambil log",false);}}
-function startPolling(){refreshJobs();refreshFiles();refreshClipSources();if(pollTimer)clearInterval(pollTimer);pollTimer=setInterval(async()=>{await refreshJobs();const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null; if(filesCache.length) await refreshFiles();}},1500);}
+function startPolling(){refreshJobs();refreshFiles();refreshClipSources();if(pollTimer){clearInterval(pollTimer);pollTimer=null;}pollTimer=setInterval(async()=>{await refreshJobs();const hasRunning=jobsCache.some(j=>j.status==="downloading"||j.status==="queued");if(!hasRunning){clearInterval(pollTimer);pollTimer=null; if(filesCache.length) await refreshFiles();}},1500);}
 // delegated clicks for jobs (avoid inline onclick breaking on ' " etc)
 document.getElementById("jobsList").addEventListener("click", e=>{
   const a=e.target.closest(".btn-logs"); if(a){showLogs(a.dataset.logs); return;}
@@ -412,11 +413,17 @@ function startClipPolling(jobId){
   if(jobId){ activeClipJobs.add(jobId); setCurrentClipJob(jobId); $("#clipLogsBody").classList.remove("hidden"); }
   saveClipJobs();
   refreshClipJobs();refreshRenders();refreshClipLogs();
-  if(clipPollTimer)clearInterval(clipPollTimer);
+  if(clipPollTimer){clearInterval(clipPollTimer);clipPollTimer=null;}
   clipPollTimer=setInterval(async()=>{
     await refreshClipJobs();
     await refreshClipLogs();
     await refreshRenders();
+    const hasRunning= document.querySelectorAll("#clipJobsList .progress-stripes").length>0;
+    if(!hasRunning && activeClipJobs.size>0){
+      // keep polling but backoff to 5s if no running
+      clearInterval(clipPollTimer);
+      clipPollTimer=setInterval(async()=>{await refreshClipJobs();await refreshClipLogs();await refreshRenders();},5000);
+    }
   },1500);
 }
 async function refreshClipLogs(){

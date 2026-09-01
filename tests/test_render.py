@@ -70,10 +70,10 @@ def test_render_engine_build_only(tmp_path: Path):
         check=True,
         capture_output=True,
     )
-    transcript = Transcript(text="test", words=[Word(word="test", start=0, end=0.5)], duration=2)
+    transcript = Transcript(text="test", words=[Word(word="test", start=0, end=0.5)], duration=20)
     plan = ClipPlan.model_validate(
         {
-            "clips": [{"start_time": 0, "end_time": 2, "hook_text": "hook", "virality_score": 90}],
+            "clips": [{"start_time": 0, "end_time": 15, "hook_text": "hook", "virality_score": 90}],
             "dead_air": [],
             "broll_cues": [],
         }

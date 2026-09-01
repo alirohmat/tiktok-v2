@@ -142,7 +142,13 @@ async def fetch_info(url: str, no_playlist: bool = True, timeout: float = 25.0) 
         "--ignore-errors",
         # Try to bypass YouTube bot detection on datacenter IP (Koyeb)
         "--extractor-args", "youtube:player_client=android,web",
-    ]
+    ] + _get_proxy_args()
+
+    # Optional cookies fallback for YouTube 403
+    import os as _os
+    cookies_path = _os.getenv("YTDLP_COOKIES") or _os.getenv("YTDLP_COOKIES_PATH")
+    if cookies_path and Path(cookies_path).exists():
+        base_flags += ["--cookies", str(Path(cookies_path))]
 
     async def _run(cmd: list[str]) -> tuple[int, bytes, bytes]:
         proc = await asyncio.create_subprocess_exec(
@@ -238,6 +244,64 @@ async def fetch_info(url: str, no_playlist: bool = True, timeout: float = 25.0) 
     }
 
 
+def _get_proxy_args() -> list[str]:
+    """Return --proxy args if proxy env is configured (pool of 5 proxies)."""
+    import os as _os
+    proxy = _os.getenv("YTDLP_PROXY") or _os.getenv("HTTP_PROXY") or _os.getenv("HTTPS_PROXY") or _os.getenv("http_proxy") or _os.getenv("https_proxy")
+    # Support comma-separated pool: rotate via hash of time
+    if proxy:
+        # If multiple proxies comma-separated, pick one deterministically
+        if "," in proxy:
+            proxies = [p.strip() for p in proxy.split(",") if p.strip()]
+            if proxies:
+                import hashlib as _hl
+                idx = int(_hl.md5(str(time.time()).encode()).hexdigest(), 16) % len(proxies)
+                proxy = proxies[idx]
+        return ["--proxy", proxy]
+    return []
+
+
+def _sanitize_extra_args(extra_args: str) -> list[str]:
+    """Whitelist strict for extra_args to prevent RCE."""
+    if not extra_args or not extra_args.strip():
+        return []
+    # Block any exec / postprocessor / proxy manipulation / load-info etc
+    lower = extra_args.lower()
+    blocked_substrings = ["--exec", "--postprocessor-args", "--ppa", "--load-info", "--proxy", "--config-location", "--batch-file", "--exec-before", "--exec-after"]
+    for b in blocked_substrings:
+        if b in lower:
+            return []
+    # Whitelist: only these flags allowed (each takes a value)
+    allowed = {"--sleep-interval", "--max-filesize", "--limit-rate", "--concurrent-fragments", "--retries", "--fragment-retries", "--socket-timeout"}
+    try:
+        parts = shlex.split(extra_args.strip())
+    except ValueError:
+        return []
+    safe: list[str] = []
+    i = 0
+    while i < len(parts):
+        p = parts[i]
+        if p in allowed:
+            if i + 1 < len(parts):
+                val = parts[i + 1]
+                # Validate value: must not start with - and must be sane
+                if val.startswith("-"):
+                    i += 2
+                    continue
+                # limit values length
+                if len(val) > 20:
+                    i += 2
+                    continue
+                safe.extend([p, val])
+                i += 2
+            else:
+                i += 1
+        else:
+            # Ignore unknown flag; do not allow bare values
+            i += 1
+    return safe
+
+
 def build_download_cmd(
     url: str,
     out_path: Path,
@@ -251,18 +315,22 @@ def build_download_cmd(
 ) -> list[str]:
     fmt = build_format_selector(quality, audio_only, format_pref)
     # Output template: use out_path as directory + %(title)s.%(ext)s but sanitize
-    # We'll let yt-dlp handle title sanitizing
+    # Use --restrict-filenames to prevent subdir traversal via %(title)s containing / or ..
+    # Also add %(id)s to guarantee uniqueness and avoid overwrite
     out_tmpl = str(out_path / "%(title)s [%(id)s].%(ext)s")
 
     cmd = YTDLP_BASE + [
         "--no-warnings",
         "--newline",
         "--no-mtime",
+        "--restrict-filenames",
         "--output",
         out_tmpl,
         "--format",
         fmt,
     ]
+    # Proxy pool support
+    cmd += _get_proxy_args()
 
     if no_playlist:
         cmd.append("--no-playlist")
@@ -294,24 +362,68 @@ def build_download_cmd(
     if embed_thumbnail and not audio_only:
         cmd += ["--embed-thumbnail"]
 
-    # extra args safe split
-    if extra_args and extra_args.strip():
-        try:
-            parts = shlex.split(extra_args.strip())
-            # block dangerous flags that escape output dir
-            blocked = {"--exec", "--exec-before-download", "--load-info-json"}
-            filtered = [p for p in parts if p not in blocked]
-            cmd += filtered
-        except ValueError:
-            # fallback: ignore malformed extra args
-            pass
+    # extra args whitelist strict
+    cmd += _sanitize_extra_args(extra_args)
 
     cmd.append(url)
     return cmd
 
 
+def _dir_stats(d: Path) -> tuple[int, int]:
+    try:
+        if not d.exists():
+            return 0, 0
+        count = 0
+        total = 0
+        for p in d.rglob("*"):
+            if p.is_file():
+                # skip partials
+                if p.suffix in (".part", ".ytdl", ".temp"):
+                    continue
+                try:
+                    total += p.stat().st_size
+                    count += 1
+                except Exception:
+                    continue
+        return count, total
+    except Exception:
+        return 0, 0
+
+
+def _check_storage_quotas() -> str | None:
+    """Check quotas for downloads/renders/uploads/cache/previews. Return error msg if exceeded."""
+    settings = get_settings()
+    base = settings.storage_path
+    # thresholds: downloads 500/15GB, others 500/5GB, total 18GB
+    limits = {
+        "downloads": (500, 15 * 1024**3),
+        "renders": (500, 5 * 1024**3),
+        "uploads": (300, 5 * 1024**3),
+        "cache": (500, 3 * 1024**3),
+        "previews": (500, 2 * 1024**3),
+    }
+    total_all = 0
+    for sub, (max_files, max_bytes) in limits.items():
+        d = base / sub
+        c, b = _dir_stats(d)
+        total_all += b
+        if c > max_files:
+            return f"Disk quota: storage/{sub} terlalu banyak file ({c}>{max_files}), hapus file lama"
+        if b > max_bytes:
+            return f"Disk quota: storage/{sub} >{max_bytes//1024**3}GB ({b/1024**3:.1f}GB), hapus file lama"
+    if total_all > 18 * 1024**3:
+        return f"Disk quota: total storage >18GB ({total_all/1024**3:.1f}GB), hapus file lama"
+    return None
+
+
 async def run_download_job(job: YtdlpJob):
     out_dir = get_download_dir()
+    err = _check_storage_quotas()
+    if err:
+        job.status = "error"
+        job.error = err
+        job.logs.append(err)
+        return
     # Ensure unique per job subfolder? Use flat downloads dir; yt-dlp already dedupes with id
     cmd = build_download_cmd(
         job.url,
@@ -359,13 +471,31 @@ async def run_download_job(job: YtdlpJob):
                 if prog.get("eta"):
                     job.eta = prog["eta"]
 
-            # Detect destination
+            # Detect destination — validate stays within download_dir via is_relative_to
             if "Destination:" in decoded:
                 # extract filename
                 m = re.search(r"Destination:\s*(.+)", decoded)
                 if m:
-                    job.filepath = m.group(1).strip()
-                    job.filename = Path(job.filepath).name
+                    candidate = m.group(1).strip()
+                    try:
+                        cand_path = Path(candidate).resolve()
+                        is_within = cand_path.is_relative_to(out_dir.resolve())
+                    except AttributeError:
+                        try:
+                            cand_path.relative_to(out_dir.resolve())
+                            is_within = True
+                        except Exception:
+                            is_within = False
+                    except Exception:
+                        is_within = False
+                    if is_within:
+                        job.filepath = candidate
+                        job.filename = Path(candidate).name
+                    else:
+                        try:
+                            job.logs.append(f"Blocked traversal dest: {candidate}")
+                        except Exception:
+                            pass
             # Detect already downloaded
             if "[download] " in decoded and "has already been downloaded" in decoded:
                 job.progress = 100.0
@@ -420,6 +550,12 @@ async def run_download_job(job: YtdlpJob):
 
 
 def create_job(url: str, options: dict[str, Any]) -> YtdlpJob:
+    # TTL cleanup for JOBS to avoid OOM
+    now = time.time()
+    stale = [jid for jid, j in list(JOBS.items()) if j.finished_at and (now - j.finished_at) > 3600]
+    old_pending = [jid for jid, j in list(JOBS.items()) if not j.finished_at and (now - j.created_at) > 86400]
+    for jid in stale + old_pending:
+        JOBS.pop(jid, None)
     job_id = uuid.uuid4().hex[:12]
     job = YtdlpJob(job_id=job_id, url=url, options=options)
     JOBS[job_id] = job

@@ -49,6 +49,28 @@ class Settings(BaseSettings):
             p = Path(__file__).parent.parent.parent / p
         return p
 
+    @property
+    def resolved_music_path(self) -> Path | None:
+        if not self.music_path:
+            return None
+        p = Path(self.music_path)
+        if p.is_absolute():
+            return p if p.exists() else None
+        # Try project root first
+        proj = Path(__file__).parent.parent.parent
+        cand = proj / p
+        if cand.exists():
+            return cand
+        # Fallback storage_path relative
+        cand2 = self.storage_path / p
+        if cand2.exists():
+            return cand2
+        # Try basename only under assets
+        cand3 = proj / "assets" / Path(p).name
+        if cand3.exists():
+            return cand3
+        return None
+
 
 _settings: Settings | None = None
 
@@ -81,7 +103,7 @@ You MUST return ONLY a valid JSON object, no markdown, no explanation, no prose 
 
 Rules:
 - clips: Each clip must be 15 to 45 seconds long (end_time - start_time between 15 and 45). Select 1-5 most viral moments. Prioritize hooks, emotional peaks, controversial statements, surprising facts.
-- dead_air: Identify silent or filler segments (um, uh, long pauses) to jump-cut. Each segment 0.3s minimum.
+- dead_air: Identify silent or filler segments (um, uh, long pauses) to jump-cut. Each segment 0.2s minimum.
 - broll_cues: For each clip, suggest 1-2 B-Roll insertion points with primary keywords_en and fallback_en (always English, 2-4 words, cinematic).
 - hook_text: 5-12 words, punchy, provocative, suitable for kinetic typography in first 3 seconds.
 - virality_score: integer 0-100, higher means more viral potential.
