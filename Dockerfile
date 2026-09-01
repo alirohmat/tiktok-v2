@@ -27,7 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 # auto-editor binary (Nim, not pip — pip deprecated per auto-editor.com/installing)
-RUN curl -L https://github.com/WyattBlue/auto-editor/releases/latest/download/auto-editor-linux -o /usr/local/bin/auto-editor \
+# 31.5.0 assets renamed: auto-editor-linux -> auto-editor-linux-x86_64 (aarch64/armv7 variants)
+RUN curl -fL https://github.com/WyattBlue/auto-editor/releases/latest/download/auto-editor-linux-x86_64 -o /usr/local/bin/auto-editor \
     && chmod +x /usr/local/bin/auto-editor \
     && auto-editor --help | head -n 20
 
