@@ -83,7 +83,17 @@ def build_format_selector(quality: str, audio_only: bool, format_pref: str) -> s
         return "bestaudio/best"
     if format_pref == "mp3" or format_pref == "m4a":
         return "bestaudio/best"
-    # video quality mapping
+    # mp4 playable: prefer h264/avc + aac/m4a inside mp4 (av1/opus tak play di iPhone/laptop lama)
+    if not audio_only and format_pref == "mp4":
+        qmap_mp4 = {
+            "best": "bv*[ext=mp4][vcodec~='^avc']+ba[ext=m4a]/bv*[ext=mp4]+ba/b[ext=mp4] / bv*+ba/b",
+            "1080": "bv*[height<=1080][ext=mp4][vcodec~='^avc']+ba[ext=m4a]/bv*[height<=1080][ext=mp4]+ba/b[height<=1080] / bv*+ba/b",
+            "720": "bv*[height<=720][ext=mp4][vcodec~='^avc']+ba[ext=m4a]/bv*[height<=720][ext=mp4]+ba/b[height<=720] / bv*+ba/b",
+            "480": "bv*[height<=480][ext=mp4][vcodec~='^avc']+ba[ext=m4a]/bv*[height<=480][ext=mp4]+ba/b[height<=480] / bv*+ba/b",
+            "worst": "worst",
+        }
+        return qmap_mp4.get(quality, qmap_mp4["best"])
+    # non-mp4 / audio: generic best
     qmap = {
         "best": "bv*+ba/b",
         "1080": "bv*[height<=1080]+ba/b[height<=1080] / bv*+ba/b",
