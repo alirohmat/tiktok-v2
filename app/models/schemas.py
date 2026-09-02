@@ -118,6 +118,8 @@ class ClipPlan(BaseModel):
     niche_tag: str = Field(default="", description="mikro-niche, e.g. kesehatan")
     niche_profit_tier: str = Field(default="", description="8-15% / 5-15% etc")
     niche_approved: bool = Field(default=True, description="LLM filter profit 8-15%")
+    niche_score: int = Field(default=70, ge=0, le=100, description="advisory 0-100 profit+demand")
+    niche_advisory: str = Field(default="", description="advisory note jika low-profit")
 
     @model_validator(mode="after")
     def check_timestamps(self) -> ClipPlan:

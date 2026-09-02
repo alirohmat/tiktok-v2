@@ -114,6 +114,9 @@ class RenderEngine:
                 "niche_tag": clip_plan.niche_tag,
                 "niche_profit_tier": clip_plan.niche_profit_tier,
                 "niche_approved": clip_plan.niche_approved,
+                "niche_score": getattr(clip_plan, "niche_score", 70),
+                "niche_advisory": getattr(clip_plan, "niche_advisory", ""),
+                "niche_mode": "advisory",
                 "comments": clip_plan.engagement_comments,
                 "replies": clip_plan.engagement_replies,
             }

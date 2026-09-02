@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # Watermark handle (fixed, bukan random besar) — atribusi fair use
     tiktok_handle: str = "brogalanblora"
 
+    # Niche gate advisory — render tetap, cuma tag skor (tidak block viral)
+    niche_mode: str = "advisory"  # advisory|soft|hard
+    niche_high_profit_tags: str = "kesehatan,edukasi,keuangan"  # 8-15% high
+
     @property
     def storage_path(self) -> Path:
         p = Path(self.storage_dir)

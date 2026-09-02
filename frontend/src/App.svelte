@@ -293,7 +293,11 @@
                     <div class="truncate"><span class="text-zinc-500">{fname.slice(0,22)}:</span> {cap.slice(0,90)}{cap.length>90?'…':''}</div>
                   {/each}
                   {#if metaCache[j.job_id].engagement}
-                    <div class="mt-1 text-[11px] text-zinc-400">#{metaCache[j.job_id].engagement.niche_tag||''} { (metaCache[j.job_id].engagement.comments||[]).slice(0,1).join(' ') }</div>
+                    <div class="mt-2 flex flex-wrap gap-1 items-center">
+                      <span class="px-2 py-0.5 rounded-full text-[11px] font-bold border {metaCache[j.job_id].engagement.niche_score>=80 ? 'bg-emerald-950 border-emerald-800 text-emerald-200' : metaCache[j.job_id].engagement.niche_score>=60 ? 'bg-amber-950 border-amber-800 text-amber-200' : 'bg-zinc-800 border-zinc-700 text-zinc-300'}">{metaCache[j.job_id].engagement.niche_tag||'umum'} {metaCache[j.job_id].engagement.niche_profit_tier||''} • {metaCache[j.job_id].engagement.niche_score??70}/100 {metaCache[j.job_id].engagement.niche_mode ? '('+metaCache[j.job_id].engagement.niche_mode+')' : ''}</span>
+                      {#if metaCache[j.job_id].engagement.niche_advisory}<span class="text-[11px] text-zinc-400">{metaCache[j.job_id].engagement.niche_advisory}</span>{/if}
+                    </div>
+                    <div class="mt-1 text-[11px] text-zinc-500 line-clamp-1">{(metaCache[j.job_id].engagement.comments||[]).slice(0,1).join(' ')}</div>
                   {/if}
                 </div>
               {/if}
@@ -324,6 +328,12 @@
                   {#each Object.values(metaCache[r.job_id].captions).slice(0,1) as cap}
                     <div class="line-clamp-2">{cap.slice(0,120)}{cap.length>120?'…':''}</div>
                   {/each}
+                </div>
+              {/if}
+              {#if metaCache[r.job_id] && metaCache[r.job_id].engagement}
+                <div class="mt-1 flex flex-wrap gap-1 items-center">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] font-bold border {metaCache[r.job_id].engagement.niche_score>=80 ? 'bg-emerald-950 border-emerald-800 text-emerald-200' : metaCache[r.job_id].engagement.niche_score>=60 ? 'bg-amber-950 border-amber-800 text-amber-200' : 'bg-zinc-800 border-zinc-700 text-zinc-300'}">{metaCache[r.job_id].engagement.niche_tag||'umum'} {metaCache[r.job_id].engagement.niche_profit_tier||''} {metaCache[r.job_id].engagement.niche_score??70}</span>
+                  <span class="text-[10px] text-zinc-500 truncate max-w-[160px]">{metaCache[r.job_id].engagement.niche_advisory||''}</span>
                 </div>
               {/if}
               {#if metaCache[r.job_id]}<details class="mt-1"><summary class="text-[11px] text-zinc-600 cursor-pointer">meta</summary><pre class="p-2 rounded bg-zinc-950 text-[11px] overflow-auto max-h-[160px]">{JSON.stringify(metaCache[r.job_id], null, 2)}</pre></details>{/if}

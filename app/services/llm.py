@@ -70,6 +70,37 @@ def _enforce_seo(plan: ClipPlan) -> ClipPlan:
     return plan
 
 
+def _apply_niche_advisory(plan: "ClipPlan") -> "ClipPlan":
+    """Advisory gate: tidak block, hanya tag skor. 90 high 8-15%, 70 mid, 50 low."""
+    tier = (plan.niche_profit_tier or "").strip()
+    tag = (plan.niche_tag or "").lower()
+    # tier parsing
+    score = 70
+    advisory = ""
+    if "8-15" in tier or "10-15" in tier:
+        score = 90
+    elif "5-15" in tier:
+        score = 70
+        if tag in ("teknologi",):
+            score = 60
+    elif "5-10" in tier:
+        score = 50
+    else:
+        score = 70 if plan.niche_approved else 45
+    if not plan.niche_approved or score < 60:
+        advisory = f"Advisory: {tag or 'umum'} {tier or '?'} — viral boleh tapi komisi tipis, tetap dirender"
+    elif score >= 80:
+        advisory = f"High-profit {tag} {tier} ✓"
+    else:
+        advisory = f"Mid-profit {tag} {tier}"
+    try:
+        plan.niche_score = int(score)
+        plan.niche_advisory = advisory
+    except Exception:
+        pass
+    return plan
+
+
 class MuseClient:
     def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None) -> None:
         settings = get_settings()
@@ -104,7 +135,7 @@ class MuseClient:
         )
         if not self.api_key or self.api_key == "your_muse_spark_key":
             plan = self._mock_plan(dur, host_name=host)
-            return _enforce_seo(plan)
+            return _apply_niche_advisory(_enforce_seo(plan))
         from openai import OpenAI  # type: ignore[import-untyped]
 
         client = OpenAI(api_key=self.api_key, base_url=self.base_url)
@@ -153,15 +184,15 @@ class MuseClient:
                             break
                         except Exception as e2:
                             logging.getLogger(__name__).warning("Fallback %r juga 404 (%s), fallback mock", alt, e2)
-                            return _enforce_seo(self._mock_plan(dur, host_name=host))
+                            return _apply_niche_advisory(_enforce_seo(self._mock_plan(dur, host_name=host)))
                     else:
                         logging.getLogger(__name__).warning("Muse model %r 404 di %s, fallback mock", self.model, self.base_url)
-                        return _enforce_seo(self._mock_plan(dur, host_name=host))
+                        return _apply_niche_advisory(_enforce_seo(self._mock_plan(dur, host_name=host)))
                 if "401" in msg or "403" in msg:
                     import logging
 
                     logging.getLogger(__name__).warning("Muse API auth %s fallback mock: %s", type(e).__name__, e)
-                    return _enforce_seo(self._mock_plan(dur, host_name=host))
+                    return _apply_niche_advisory(_enforce_seo(self._mock_plan(dur, host_name=host)))
                 if is_retryable and attempt < 2:
                     time.sleep(5)
                     continue
@@ -171,14 +202,14 @@ class MuseClient:
                         import logging
 
                         logging.getLogger(__name__).warning("LLM retry 3x failed (%s), fallback mock", e)
-                        return _enforce_seo(self._mock_plan(dur, host_name=host))
+                        return _apply_niche_advisory(_enforce_seo(self._mock_plan(dur, host_name=host)))
                     raise
                 # non-retryable
                 raise
         if response is None:
             if last_err:
                 raise last_err
-            return _enforce_seo(self._mock_plan(dur, host_name=host))
+            return _apply_niche_advisory(_enforce_seo(self._mock_plan(dur, host_name=host)))
         raw = response.choices[0].message.content or ""
         try:
             plan = self._parse_and_validate(raw, dur, client, user_prompt)
@@ -190,7 +221,7 @@ class MuseClient:
                     plan.host_name = host or plan.host_name
             elif host:
                 plan.host_name = host
-            return _enforce_seo(plan)
+            return _apply_niche_advisory(_enforce_seo(plan))
         except Exception:
             raise
 
