@@ -231,15 +231,16 @@ class FFmpegBuilder:
                 filter_parts.append(f"[{v_label}]select='not({expr_v})',setpts=N/FRAME_RATE/TB[{nxt_v_da}];")
                 v_label = nxt_v_da
 
-        # B-Roll overlay — glitch-ish via tblend? simple overlay with scale + slight blur edge
+        # B-Roll overlay — Coverr auto fetch (source_broll) + xfade 0.25s alpha (PDF 2-3s stok)
         for idx, (cue, bpath) in enumerate(zip(broll_cues, broll_paths)):
             broll_input_idx = 1 + idx
             b_v = f"b{idx}"
-            filter_parts.append(f"[{broll_input_idx}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuv420p[{b_v}];")
+            # b-roll chain: scale -> yuva420p -> fade in/out alpha (0.25s) so overlay xfade smooth, not hard cut
+            filter_parts.append(
+                f"[{broll_input_idx}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuva420p,fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st=1.75:d=0.25:alpha=1,format=yuva420p[{b_v}];"
+            )
             offset = max(0, cue.timestamp - clip_start)
-            # xfade-like: overlay 2s with soft alpha blend via tblend would need extra; keep overlay enable + fade
             out_v = f"v{len(filter_parts)+10}"
-            # fade in/out 0.15s via alpha? use overlay + format; keep simple but add format
             filter_parts.append(
                 f"[{v_label}][{b_v}]overlay=0:0:enable='between(t,{offset:.2f},{offset+2:.2f})',format=yuv420p[{out_v}];"
             )
