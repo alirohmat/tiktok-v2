@@ -23,20 +23,11 @@ def _groq_throttle() -> None:
     global _last_groq_call
     settings = get_settings()
     rpm = max(1, settings.groq_rate_limit_per_minute)
-    min_interval = 60.0 / rpm
-    jitter = random.uniform(0, 0.8)
-    min_interval += jitter
-    sleep_for = 0.0
+    min_interval = 60.0 / rpm + random.uniform(0, 0.8)
     with _groq_lock:
         elapsed = time.time() - _last_groq_call
         if elapsed < min_interval:
-            sleep_for = min_interval - elapsed
-        else:
-            _last_groq_call = time.time()
-            return
-    if sleep_for > 0:
-        time.sleep(sleep_for)
-    with _groq_lock:
+            time.sleep(min_interval - elapsed)
         _last_groq_call = time.time()
 
 

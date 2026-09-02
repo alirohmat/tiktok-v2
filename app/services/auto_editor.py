@@ -78,7 +78,8 @@ def export_dead_air(
     bin_path = _binary()
     if bin_path is None:
         return []
-    tmp_json = src.parent / f".ae_{src.stem}.json"
+    import tempfile as _tmp, uuid as _uuid
+    tmp_json = Path(_tmp.gettempdir()) / f".ae_{src.stem}_{_uuid.uuid4().hex[:8]}.json"
     cmd = [
         bin_path,
         str(src),

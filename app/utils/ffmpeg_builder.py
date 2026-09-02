@@ -39,7 +39,7 @@ def _wrap_text(text: str, max_chars: int = 22) -> str:
     return "\n".join(lines)
 
 def _escape_drawtext(text: str) -> str:
-    r"""Escape drawtext text for filter_complex: \ : ' % [ ] ; — keeps \n for wrap"""
+    r"""Escape drawtext text for filter_complex: \ : ' % [ ] ; = , — keeps \n for wrap"""
     parts = text.split("\n")
     out: list[str] = []
     for part in parts:
@@ -50,6 +50,8 @@ def _escape_drawtext(text: str) -> str:
         t = t.replace("[", "\\[")
         t = t.replace("]", "\\]")
         t = t.replace(";", "\\;")
+        t = t.replace("=", "\\=")
+        t = t.replace(",", "\\,")
         t = t.replace('"', "")
         out.append(t)
     return "\n".join(out) if len(out) > 1 else out[0] if out else ""
@@ -106,6 +108,12 @@ def _write_word_ass(words: list, clip_start: float, clip_end: float, ass_path: P
             return False
         ass_path.parent.mkdir(parents=True, exist_ok=True)
         if len(rel) > 70:
+            try:
+                import logging as _lg2
+
+                _lg2.getLogger(__name__).warning("ASS truncate %s -> 70 words (clip %.1f-%.1f)", len(rel), clip_start, clip_end)
+            except Exception:
+                pass
             rel = rel[:70]
         lines = []
         lines.append("[Script Info]")
@@ -132,7 +140,17 @@ def _write_word_ass(words: list, clip_start: float, clip_end: float, ass_path: P
     except Exception:
         return False
 
-def random_creation_time() -> str:
+def random_creation_time(seed: str | None = None) -> str:
+    """Deterministik jika seed diberi (hash src+clip_start), fallback random untuk backward-compat."""
+    if seed is not None:
+        import hashlib
+
+        h = int(hashlib.sha256(seed.encode()).hexdigest()[:8], 16)
+        rng = random.Random(h)
+        base = datetime(2023, 1, 1, tzinfo=timezone.utc)
+        delta = timedelta(days=rng.randint(0, 700), seconds=rng.randint(0, 86400))
+        dt = base + delta
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
     base = datetime(2023, 1, 1, tzinfo=timezone.utc)
     delta = timedelta(days=random.randint(0, 700), seconds=random.randint(0, 86400))
     dt = base + delta
@@ -183,7 +201,8 @@ class FFmpegBuilder:
         Returns argv suitable for subprocess.run.
         """
         duration = clip_end - clip_start
-        creation_time = random_creation_time()
+        # ponytail: creation_time deterministik dari src+clip agar rerender identik; fallback random jika seed None
+        creation_time = random_creation_time(seed=f"{self.src}:{clip_start:.2f}:{clip_end:.2f}")
 
         cmd: list[str] = ["ffmpeg", "-y"]
         cmd += ["-ss", f"{clip_start:.3f}", "-t", f"{duration:.3f}", "-i", str(self.src)]
@@ -196,6 +215,20 @@ class FFmpegBuilder:
         filter_parts: list[str] = []
         v_label = "0:v"
         next_v = "v0"
+        _vid = 200  # ponytail: auto counter > sequential v0.. to avoid v80/v90 collision
+        _aid = 200
+
+        def _next_v() -> str:
+            nonlocal _vid
+            s = f"v{_vid}"
+            _vid += 1
+            return s
+
+        def _next_a() -> str:
+            nonlocal _aid
+            s = f"a{_aid}"
+            _aid += 1
+            return s
 
         if crop_window is not None:
             crop_f = build_crop_filter(crop_window)
@@ -239,7 +272,7 @@ class FFmpegBuilder:
                     rel_dead_air.append((s, e))
             if rel_dead_air:
                 expr_v = "+".join(f"between(t\\,{s:.3f}\\,{e:.3f})" for s, e in rel_dead_air)
-                nxt_v_da = f"v{len(filter_parts)+80}"
+                nxt_v_da = _next_v()
                 filter_parts.append(f"[{v_label}]select='not({expr_v})',setpts=N/FRAME_RATE/TB[{nxt_v_da}];")
                 v_label = nxt_v_da
 
@@ -252,7 +285,7 @@ class FFmpegBuilder:
                 f"[{broll_input_idx}:v]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1,fps=30,format=yuva420p,fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st=1.75:d=0.25:alpha=1,format=yuva420p[{b_v}];"
             )
             offset = max(0, cue.timestamp - clip_start)
-            out_v = f"v{len(filter_parts)+10}"
+            out_v = _next_v()
             filter_parts.append(
                 f"[{v_label}][{b_v}]overlay=0:0:enable='between(t,{offset:.2f},{offset+2:.2f})',format=yuv420p[{out_v}];"
             )
@@ -282,7 +315,7 @@ class FFmpegBuilder:
             ls2 = ":line_spacing=8" if nkw > 1 else ""
             safe_kw = _escape_drawtext(wrapped_kw)
             ff2 = _fontfile_arg()
-            next_kw = f"v{len(filter_parts)+44}"
+            next_kw = _next_v()
             filter_parts.append(f"[{v_label}]drawtext=text='{safe_kw}'{ff2}:fontcolor=yellow:fontsize={kw_fs}:box=1:boxcolor=black@0.55:boxborderw=8:x=(w-text_w)/2:y=(h*0.35){ls2}:enable='between(t,0.2,2.7)'[{next_kw}];")
             v_label = next_kw
 
@@ -295,7 +328,7 @@ class FFmpegBuilder:
             ls3 = ":line_spacing=6" if ncta > 1 else ""
             safe_cta = _escape_drawtext(wrapped_cta)
             ff3 = _fontfile_arg()
-            next_cta = f"v{len(filter_parts)+45}"
+            next_cta = _next_v()
             filter_parts.append(f"[{v_label}]drawtext=text='{safe_cta}'{ff3}:fontcolor=white:fontsize={cta_fs}:box=1:boxcolor=red@0.7:boxborderw=10:x=(w-text_w)/2:y={cta_y}{ls3}:enable='gte(t,{duration-5:.1f})'[{next_cta}];")
             v_label = next_cta
 
@@ -316,7 +349,7 @@ class FFmpegBuilder:
             if wm_text:
                 safe_wm = _escape_drawtext(wm_text)
                 ff_wm = _fontfile_arg()
-                next_wm = f"v{len(filter_parts)+90}"
+                next_wm = _next_v()
                 # alpha 0.18 subtle, box@0.35 small border 4
                 filter_parts.append(f"[{v_label}]drawtext=text='{safe_wm}'{ff_wm}:fontcolor=white@0.18:fontsize=16:box=1:boxcolor=black@0.35:boxborderw=4:x=w-text_w-14:y=h-28:enable='gte(t,0)'[{next_wm}];")
                 v_label = next_wm
@@ -335,7 +368,7 @@ class FFmpegBuilder:
                 if ok and ass_path.exists():
                     # escape colon and single quote for filter_complex
                     ass_str = str(ass_path).replace(":", "\\:").replace("'", "")
-                    next_ass = f"v{len(filter_parts)+90}"
+                    next_ass = _next_v()
                     filter_parts.append(f"[{v_label}]ass='{ass_str}'[{next_ass}];")
                     v_label = next_ass
                     ass_added = True
@@ -351,13 +384,13 @@ class FFmpegBuilder:
                 f"[{a_label}]asetrate=48480,aresample=48000,atempo=1/1.01[{next_a}];"
             )
             a_label = next_a
-            next_a = f"a{len(filter_parts)+20}"
+            next_a = _next_a()
         if rel_dead_air:
             expr_a = "+".join(f"between(t\\,{s:.3f}\\,{e:.3f})" for s, e in rel_dead_air)
-            nxt_a_da2 = f"a{len(filter_parts)+85}"
+            nxt_a_da2 = _next_a()
             filter_parts.append(f"[{a_label}]aselect='not({expr_a})',asetpts=N/SR/TB[{nxt_a_da2}];")
             a_label = nxt_a_da2
-            next_a = f"a{len(filter_parts)+86}"
+            next_a = _next_a()
 
         if self.enable_ultrasonic:
             _dead_sum = sum(e - s for s, e in rel_dead_air) if rel_dead_air else 0.0
@@ -368,7 +401,7 @@ class FFmpegBuilder:
                 f"[{a_label}][ultra_vol]amix=inputs=2:duration=first:dropout_transition=0[{next_a}];"
             )
             a_label = next_a
-            next_a = f"a{len(filter_parts)+30}"
+            next_a = _next_a()
 
         if has_music:
             music_idx = 1 + len(broll_paths)

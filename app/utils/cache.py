@@ -35,19 +35,19 @@ class CoverrCache:
     async def get(self, keyword: str) -> dict | None:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            row = None
             async with db.execute(
                 "SELECT * FROM coverr_cache WHERE keyword=?", (keyword.lower(),)
             ) as cur:
                 row = await cur.fetchone()
-                if row is None:
-                    return None
-                created = row["created_at"]
-                if time.time() - float(created) > self.ttl:
-                    # expired
-                    await db.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
-                    await db.commit()
-                    return None
-                return dict(row)
+            if row is None:
+                return None
+            created = row["created_at"]
+            if time.time() - float(created) > self.ttl:
+                await db.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
+                await db.commit()
+                return None
+            return dict(row)
 
     async def set(
         self,
@@ -75,21 +75,21 @@ class CoverrCache:
 
         if not self.db_path.exists():
             return None
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute("SELECT * FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
-        row = cur.fetchone()
-        conn.close()
-        if row is None:
-            return None
-        created = row["created_at"]  # type: ignore[index]
-        if time.time() - float(created) > self.ttl:
-            conn2 = sqlite3.connect(self.db_path)
-            conn2.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
-            conn2.commit()
-            conn2.close()
-            return None
-        return dict(row)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.execute("SELECT * FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
+            row = cur.fetchone()
+            if row is None:
+                return None
+            created = row["created_at"]  # type: ignore[index]
+            if time.time() - float(created) > self.ttl:
+                conn.execute("DELETE FROM coverr_cache WHERE keyword=?", (keyword.lower(),))
+                conn.commit()
+                return None
+            return dict(row)
+        finally:
+            conn.close()
 
     def set_sync(
         self,

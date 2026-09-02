@@ -17,8 +17,8 @@ try:
         task_acks_late=True,
         worker_prefetch_multiplier=1,
         task_reject_on_worker_lost=True,
-        task_time_limit=600,
-        task_soft_time_limit=540,
+        task_time_limit=3600,
+        task_soft_time_limit=3300,
         result_expires=3600,
         task_routes={
             "app.workers.tasks.transcribe_chunk": {"rate_limit": "10/m"},

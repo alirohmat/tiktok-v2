@@ -26,9 +26,37 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=_allow_creds,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Requested-With"],
 )
+
+# API-Key gate: jika CLIPPER_API_KEY/API_KEY set, POST/PUT/PATCH/DELETE butuh X-API-Key
+from fastapi import Request as _Req
+from fastapi.responses import JSONResponse as _JR
+
+@app.middleware("http")
+async def _api_key_gate(request: _Req, call_next):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        # preflight bebas
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        try:
+            from app.core.config import get_settings as _gs2
+            need = (_gs2().api_key or "").strip()
+        except Exception:
+            need = ""
+        if need:
+            got = request.headers.get("x-api-key") or request.headers.get("X-API-Key") or ""
+            # juga dukung Authorization: Bearer <key>
+            if not got:
+                auth = request.headers.get("authorization") or request.headers.get("Authorization") or ""
+                if auth.lower().startswith("bearer "):
+                    got = auth[7:].strip()
+            # constant-time compare
+            import hmac as _hm
+            if not _hm.compare_digest(got, need):
+                return _JR(status_code=401, content={"detail": "Unauthorized: X-API-Key salah"})
+    return await call_next(request)
 
 app.include_router(router)
 app.include_router(ytdlp_router)
@@ -38,7 +66,7 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse as _FileResponse
 from pathlib import Path as _Path
 import re as _re
-_JOB_RE = _re.compile(r"^[a-f0-9-]{8,}$")
+_JOB_RE = _re.compile(r"^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{8,32})$")
 
 def _is_within_main(child: _Path, parent: _Path) -> bool:
     try:

@@ -142,10 +142,10 @@ class RenderEngine:
                 p = broll_map.get(cue.keywords_en) or broll_map.get(cue.fallback_en)
                 if p and p.exists():
                     paths.append(p)
-            # SEO filename
+            # SEO filename — ms precision anti-collision (:.0f 0.4 vs 0.6 -> 0)
             kw = (clip.seo_keyword or _slug(clip.hook_text)).strip("-")
             kw = re.sub(r"[^a-z0-9-]+", "-", kw.lower()).strip("-")[:40] or "viral-clip"
-            out = output_dir / f"{kw}-{idx:02d}_{clip.start_time:.0f}_{clip.end_time:.0f}.mp4"
+            out = output_dir / f"{kw}-{idx:02d}_{int(clip.start_time*1000):06d}_{int(clip.end_time*1000):06d}.mp4"
             # sanitize: ensure no spaces
             self.render_clip(src, clip, transcript, clip_plan, paths, out, source_channel=_src_ch, tiktok_handle=_handle)
             outputs.append(out)

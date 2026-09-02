@@ -13,7 +13,54 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import ipaddress as _ipaddr
+import socket as _socket
+from urllib.parse import urlparse as _urlparse
+
 from app.core.config import get_settings
+
+
+def validate_download_url(url: str) -> None:
+    """Block SSRF: private/link-local/loopback/metadata. stdlib only."""
+    if not url or not isinstance(url, str):
+        raise ValueError("URL kosong")
+    u = url.strip()
+    if not u.startswith(("http://", "https://")):
+        raise ValueError("URL harus http:// atau https://")
+    try:
+        p = _urlparse(u)
+    except Exception:
+        raise ValueError("URL tidak valid")
+    host = (p.hostname or "").lower().strip()
+    if not host:
+        raise ValueError("URL tanpa host")
+    if host in ("localhost", "metadata.google.internal", "metadata.google"):
+        raise ValueError(f"Host {host} diblokir (SSRF)")
+    # DNS resolution check for private IP (rebinding)
+    try:
+        for fam, _, _, _, sockaddr in _socket.getaddrinfo(host, None, 0, _socket.SOCK_STREAM):
+            ip_str = sockaddr[0]
+            try:
+                ip = _ipaddr.ip_address(ip_str.split("%")[0])
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified or str(ip) == "169.254.169.254":
+                    raise ValueError(f"IP {ip_str} diblokir (private/loopback)")
+            except ValueError as ve:
+                if "diblokir" in str(ve):
+                    raise
+    except ValueError:
+        raise
+    except Exception:
+        pass  # DNS fail -> allow, yt-dlp will error later
+    # literal IP check fallback
+    try:
+        ip = _ipaddr.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+            raise ValueError(f"IP {host} diblokir (private/loopback)")
+        if str(ip) == "169.254.169.254":
+            raise ValueError("Metadata IP diblokir")
+    except ValueError as ve:
+        if "diblokir" in str(ve):
+            raise
 
 
 def _yt_dlp_cmd() -> list[str]:
@@ -136,8 +183,7 @@ def parse_progress_line(line: str) -> dict[str, Any] | None:
 
 async def fetch_info(url: str, no_playlist: bool = True, timeout: float = 25.0) -> dict[str, Any]:
     """Run yt-dlp --dump-json --no-download to get metadata. Timeout & anti-bengong."""
-    if not url or not url.startswith(("http://", "https://")):
-        raise ValueError("URL harus diawali http:// atau https://")
+    validate_download_url(url)
 
     base_flags = [
         "--dump-json",
@@ -422,6 +468,35 @@ def _dir_stats(d: Path) -> tuple[int, int]:
         return 0, 0
 
 
+async def _dir_stats_async(d: Path) -> tuple[int, int]:
+    """#25 non-blocking wrapper — offload rglob to thread to avoid blocking event loop."""
+    return await asyncio.to_thread(_dir_stats, d)
+
+
+async def _check_storage_quotas_async() -> str | None:
+    """Async variant for use inside async contexts (run_download_job, SSE)."""
+    settings = get_settings()
+    base = settings.storage_path
+    limits = {
+        "downloads": (500, 15 * 1024**3),
+        "renders": (500, 5 * 1024**3),
+        "uploads": (300, 5 * 1024**3),
+        "cache": (500, 3 * 1024**3),
+        "previews": (500, 2 * 1024**3),
+    }
+    total_all = 0
+    for sub, (max_files, max_bytes) in limits.items():
+        c, b = await _dir_stats_async(base / sub)
+        total_all += b
+        if c > max_files:
+            return f"Disk quota: storage/{sub} terlalu banyak file ({c}>{max_files}), hapus file lama"
+        if b > max_bytes:
+            return f"Disk quota: storage/{sub} >{max_bytes//1024**3}GB ({b/1024**3:.1f}GB), hapus file lama"
+    if total_all > 18 * 1024**3:
+        return f"Disk quota: total storage >18GB ({total_all/1024**3:.1f}GB), hapus file lama"
+    return None
+
+
 def _check_storage_quotas() -> str | None:
     """Check quotas for downloads/renders/uploads/cache/previews. Return error msg if exceeded."""
     settings = get_settings()
@@ -450,12 +525,22 @@ def _check_storage_quotas() -> str | None:
 
 async def run_download_job(job: YtdlpJob):
     out_dir = get_download_dir()
-    err = _check_storage_quotas()
+    err = await _check_storage_quotas_async()
     if err:
         job.status = "error"
         job.error = err
         job.logs.append(err)
         return
+    # track active in redis for multi-worker rate-limit (#4)
+    _rcli = None
+    try:
+        import redis as _redis_mod  # type: ignore[import-untyped]
+        from app.core.config import get_settings as _gs2
+        _rcli = _redis_mod.from_url(_gs2().redis_url, socket_connect_timeout=1)
+        _rcli.sadd("ytdlp:active", job.job_id)
+        _rcli.expire("ytdlp:active", 3600)
+    except Exception:
+        pass
     # Ensure unique per job subfolder? Use flat downloads dir; yt-dlp already dedupes with id
     cmd = build_download_cmd(
         job.url,
@@ -544,17 +629,27 @@ async def run_download_job(job: YtdlpJob):
             job.status = "completed"
             job.progress = 100.0
             job.finished_at = time.time()
-            # Try to find file if not captured
+            # Try to find file if not captured — avoid concurrent mis-assign (#13)
             if not job.filepath or not Path(job.filepath).exists():
-                # search latest file in download dir
-                files = sorted(out_dir.glob("*"), key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
-                if files:
-                    # find most recent that matches job timing (within 2 minutes)
-                    for f in files[:5]:
-                        if f.is_file() and f.stat().st_mtime >= job.created_at - 1:
-                            job.filepath = str(f)
-                            job.filename = f.name
-                            break
+                claimed = {j.filepath for j in JOBS.values() if j.job_id != job.job_id and j.filepath}
+                cands: list[Path] = []
+                for f in out_dir.iterdir():
+                    if not f.is_file() or f.suffix in (".part", ".ytdl", ".temp"):
+                        continue
+                    try:
+                        mt = f.stat().st_mtime
+                    except Exception:
+                        continue
+                    if mt < job.created_at - 1 or mt > time.time() + 2:
+                        continue
+                    if str(f) in claimed:
+                        continue
+                    cands.append(f)
+                if cands:
+                    cands.sort(key=lambda p: abs(p.stat().st_mtime - job.created_at))
+                    best = cands[0]
+                    job.filepath = str(best)
+                    job.filename = best.name
             # filesize
             try:
                 if job.filepath and Path(job.filepath).exists():
@@ -580,6 +675,13 @@ async def run_download_job(job: YtdlpJob):
         job.status = "error"
         job.error = str(e)
         job.logs.append(f"ERROR: {e}")
+    finally:
+        if _rcli is not None:
+            try:
+                _rcli.srem("ytdlp:active", job.job_id)
+                _rcli.close()
+            except Exception:
+                pass
 
 
 def create_job(url: str, options: dict[str, Any]) -> YtdlpJob:

@@ -21,6 +21,7 @@ def get_duration(path: Path) -> float:
         capture_output=True,
         text=True,
         check=True,
+        timeout=15,
     )
     data = json.loads(result.stdout)
     # Try format duration first
@@ -57,6 +58,7 @@ def extract_audio(src: Path, dst: Path) -> Path:
         ],
         check=True,
         capture_output=True,
+        timeout=120,
     )
     return dst
 
@@ -106,6 +108,7 @@ def chunk_audio(
             ],
             check=True,
             capture_output=True,
+            timeout=60,
         )
         chunks.append((chunk_path, start, dur))
         start += chunk_sec - overlap_sec

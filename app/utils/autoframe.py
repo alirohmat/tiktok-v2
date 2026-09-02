@@ -21,6 +21,7 @@ def get_video_dimensions(path: Path) -> tuple[int, int]:
         capture_output=True,
         text=True,
         check=True,
+        timeout=15,
     )
     data = json.loads(result.stdout)
     for s in data.get("streams", []):
@@ -61,33 +62,38 @@ def detect_crop_window(
         face_sizes: list[float] = []  # bbox width for largest-face heuristic
 
         cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return _center_crop(w, h, crop_w, crop_h)
+        try:
+            if not cap.isOpened():
+                return _center_crop(w, h, crop_w, crop_h)
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        frame_interval = max(1, int(fps / sample_fps))
-        idx = 0
-        with mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.5) as detector:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                if idx % frame_interval != 0:
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            frame_interval = max(1, int(fps / sample_fps))
+            idx = 0
+            with mp_face.FaceDetection(model_selection=0, min_detection_confidence=0.5) as detector:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    if idx % frame_interval != 0:
+                        idx += 1
+                        continue
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = detector.process(rgb)
+                    if results.detections:
+                        # Collect ALL faces per frame (not just first) — for 2-person union/cluster
+                        for det in results.detections:
+                            bbox = det.location_data.relative_bounding_box
+                            cx = bbox.xmin + bbox.width / 2.0
+                            face_centers.append(cx * w)
+                            face_sizes.append(bbox.width * w)
                     idx += 1
-                    continue
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = detector.process(rgb)
-                if results.detections:
-                    # Collect ALL faces per frame (not just first) — for 2-person union/cluster
-                    for det in results.detections:
-                        bbox = det.location_data.relative_bounding_box
-                        cx = bbox.xmin + bbox.width / 2.0
-                        face_centers.append(cx * w)
-                        face_sizes.append(bbox.width * w)
-                idx += 1
-                if idx > 300:
-                    break
-        cap.release()
+                    if idx > 300:
+                        break
+        finally:
+            try:
+                cap.release()
+            except Exception:
+                pass
 
         if not face_centers:
             return _center_crop(w, h, crop_w, crop_h)

@@ -69,12 +69,32 @@ async def ytdlp_info(body: InfoRequest):
 
 @router.post("/download")
 async def ytdlp_download(body: DownloadRequest, bg: BackgroundTasks):
-    if not body.url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="URL harus diawali http:// atau https://")
+    from app.services.ytdlp_service import validate_download_url as _vurl
+    try:
+        _vurl(body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # Simple rate-limit guard: reject if too many active jobs (>20 pending/downloading)
-    active = sum(1 for j in JOBS.values() if j.status in ("queued", "downloading"))
-    if active > 20:
+    # Rate-limit shared via redis set when available, fallback in-memory (#4 multi-worker)
+    def _is_rate_limited() -> bool:
+        try:
+            import redis as _r  # type: ignore[import-untyped]
+            from app.core.config import get_settings as _gs
+            _s = _gs()
+            _cli = _r.from_url(_s.redis_url, socket_connect_timeout=1)
+            try:
+                if _cli.scard("ytdlp:active") > 20:
+                    return True
+            finally:
+                try:
+                    _cli.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return sum(1 for j in JOBS.values() if j.status in ("queued", "downloading")) > 20
+
+    if _is_rate_limited():
         raise HTTPException(status_code=429, detail="Terlalu banyak download aktif, coba lagi nanti")
 
     options = {
@@ -90,11 +110,16 @@ async def ytdlp_download(body: DownloadRequest, bg: BackgroundTasks):
 
     def _runner_sync():
         import asyncio as _asyncio
+        _loop = _asyncio.new_event_loop()
         try:
-            _asyncio.run(run_download_job(job))
+            _asyncio.set_event_loop(_loop)
+            _loop.run_until_complete(run_download_job(job))
         except Exception as e:
             job.status = "error"
             job.error = str(e)
+        finally:
+            _loop.close()
+            _asyncio.set_event_loop(None)
 
     # Use BackgroundTasks for persistence across event loop reload
     bg.add_task(_runner_sync)

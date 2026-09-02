@@ -38,7 +38,8 @@ def _extract_json(text: str) -> str:
             json.loads(candidate)
             return candidate
         except Exception:
-            return candidate
+            # ponytail: candidate invalid — return original text to trigger repair flow, not invalid JSON
+            pass
     return text
 
 
@@ -134,7 +135,16 @@ class MuseClient:
             f"Select best clips 55-90s each (min15 max90), guest_names=only invited people (trigger: kedatangan/bersama/tamu/menemui/spesial), hook pakai guest_names jika ada, seo_keyword hyphenated, caption keyword first 50 chars, 3-5 hashtags, CTA Share/Save, engagement 3+2, niche profit tier, host_name/guest_names. Return ONLY JSON."
         )
         if not self.api_key or self.api_key == "your_muse_spark_key":
+            import logging as _lg
+
+            _lg.getLogger(__name__).warning("Muse API key kosong/placeholder — pakai MOCK plan (bukan hasil LLM real)")
             plan = self._mock_plan(dur, host_name=host)
+            # tandai mock biar UI/advisory kelihatan, bukan silent sukses
+            try:
+                plan.niche_advisory = "[MOCK — API key kosong] " + (plan.niche_advisory or "")
+                plan.niche_score = min(plan.niche_score, 60)
+            except Exception:
+                pass
             return _apply_niche_advisory(_enforce_seo(plan))
         from openai import OpenAI  # type: ignore[import-untyped]
 

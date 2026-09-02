@@ -11,15 +11,21 @@ from pydantic import BaseModel, Field
 
 import asyncio as _asyncio
 import json as _json
+import threading as _threading
 import time as _time
+from concurrent.futures import ThreadPoolExecutor as _TPE
 
 from app.core.config import get_settings
 from app.models.schemas import JobStatus
 
+_CLIP_EXECUTOR = _TPE(max_workers=2, thread_name_prefix="clip-eager")
+_CLIP_LOCK = _threading.Lock()
+
 router = APIRouter()
 
 # --- Security constants ---
-_JOB_ID_RE = re.compile(r"^[a-f0-9-]{8,}$")
+# strict: UUID v4 36-char atau hex 12/32 (block "--------")
+_JOB_ID_RE = re.compile(r"^(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{8,32})$")
 _FILENAME_RE = re.compile(r"^[^/\\]+$")
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
 CHUNK_SIZE = 1024 * 1024  # 1 MB streaming
@@ -27,7 +33,7 @@ CHUNK_SIZE = 1024 * 1024  # 1 MB streaming
 
 def _validate_job_id(job_id: str) -> None:
     if not _JOB_ID_RE.match(job_id):
-        raise HTTPException(status_code=400, detail="job_id tidak valid (harus hex/uuid, min 8 char)")
+        raise HTTPException(status_code=400, detail="job_id tidak valid (harus UUID atau hex 8-32)")
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -61,12 +67,12 @@ def _resolve_within_storage(path: Path, storage_root: Path) -> Path:
 def _enforce_job_ttl(max_age_sec: float = 3600) -> None:
     """Evict stale CLIP_JOBS / CLIP_LOGS to avoid unbounded memory (TTL)."""
     now = _time.time()
-    stale = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > max_age_sec and js.status in ("PENDING", "STARTED", "PROCESSING")]
-    # Do not auto-evict SUCCESS/FAILURE quickly; keep 24h
-    old = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > 86400]
-    for jid in set(stale + old):
-        CLIP_JOBS.pop(jid, None)
-        CLIP_LOGS.pop(jid, None)
+    with _CLIP_LOCK:
+        stale = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > max_age_sec and js.status in ("PENDING", "STARTED", "PROCESSING")]
+        old = [jid for jid, js in list(CLIP_JOBS.items()) if js.started_at and (now - js.started_at) > 86400]
+        for jid in set(stale + old):
+            CLIP_JOBS.pop(jid, None)
+            CLIP_LOGS.pop(jid, None)
 
 
 class ClipFromFileRequest(BaseModel):
@@ -91,24 +97,24 @@ CLIP_LOGS: dict[str, list[str]] = {}
 def _clip_log(job_id: str, msg: str):
     ts = _time.strftime("%H:%M:%S")
     line = f"[{ts}] {msg}"
-    lst = CLIP_LOGS.setdefault(job_id, [])
-    lst.append(line)
-    if len(lst) > 500:
-        CLIP_LOGS[job_id] = lst[-500:]
-    # sync ke JobStatus.logs agar GET /jobs/{id} live
-    if job_id in CLIP_JOBS:
-        js = CLIP_JOBS[job_id]
-        CLIP_JOBS[job_id] = js.model_copy(update={"logs": list(CLIP_LOGS[job_id])})
+    with _CLIP_LOCK:
+        lst = CLIP_LOGS.setdefault(job_id, [])
+        lst.append(line)
+        if len(lst) > 500:
+            CLIP_LOGS[job_id] = lst[-500:]
+        if job_id in CLIP_JOBS:
+            js = CLIP_JOBS[job_id]
+            CLIP_JOBS[job_id] = js.model_copy(update={"logs": list(CLIP_LOGS[job_id])})
 
 def _update_clip_job(job_id: str, **kw):
-    if job_id in CLIP_JOBS:
-        js = CLIP_JOBS[job_id]
-        CLIP_JOBS[job_id] = js.model_copy(update=kw)
-        # keep logs synced
-        if job_id in CLIP_LOGS:
-            CLIP_JOBS[job_id] = CLIP_JOBS[job_id].model_copy(update={"logs": list(CLIP_LOGS[job_id])})
-    else:
-        CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status=kw.get("status","PENDING"), phase=kw.get("phase",""), progress=kw.get("progress",0.0), logs=list(CLIP_LOGS.get(job_id,[])), **{k:v for k,v in kw.items() if k not in ("status","phase","progress")})
+    with _CLIP_LOCK:
+        if job_id in CLIP_JOBS:
+            js = CLIP_JOBS[job_id]
+            CLIP_JOBS[job_id] = js.model_copy(update=kw)
+            if job_id in CLIP_LOGS:
+                CLIP_JOBS[job_id] = CLIP_JOBS[job_id].model_copy(update={"logs": list(CLIP_LOGS[job_id])})
+        else:
+            CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status=kw.get("status","PENDING"), phase=kw.get("phase",""), progress=kw.get("progress",0.0), logs=list(CLIP_LOGS.get(job_id,[])), **{k:v for k,v in kw.items() if k not in ("status","phase","progress")})
 
 def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> JobStatus:
     """Jalankan clip pipeline via Celery jika tersedia, fallback eager (non-blocking) dengan live logs detail."""
@@ -130,9 +136,10 @@ def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> 
     # Validate src is within storage
     _resolve_within_storage(src, settings.storage_path)
     _validate_job_id(job_id)
-    if job_id in CLIP_JOBS and CLIP_JOBS[job_id].status in ("PENDING", "STARTED", "PROCESSING"):
-        raise HTTPException(status_code=409, detail=f"job_id {job_id} sudah dipakai (status {CLIP_JOBS[job_id].status})")
-    CLIP_LOGS[job_id] = []
+    with _CLIP_LOCK:
+        if job_id in CLIP_JOBS and CLIP_JOBS[job_id].status in ("PENDING", "STARTED", "PROCESSING"):
+            raise HTTPException(status_code=409, detail=f"job_id {job_id} sudah dipakai (status {CLIP_JOBS[job_id].status})")
+        CLIP_LOGS[job_id] = []
     _clip_log(job_id, f"Queued: {src.name}")
     # Try Celery async (redis tersedia)
     try:
@@ -149,16 +156,19 @@ def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> 
         else:
             run_full_pipeline.delay(str(src), job_id)  # type: ignore[attr-defined]
         js = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
-        CLIP_JOBS[job_id] = js
+        with _CLIP_LOCK:
+            CLIP_JOBS[job_id] = js
+        try:
+            r.close()
+        except Exception:
+            pass
         return js
     except HTTPException:
         raise
     except Exception as e:
         _clip_log(job_id, f"Redis tidak tersedia ({e}) — fallback eager thread (lean mode)")
 
-    # Fallback eager: jalankan di background thread agar HTTP tidak block (fix bug pending hilang saat refresh)
-    import threading
-
+    # Fallback eager: executor bounded (max 2) — cegah OOM 100 thread
     def _bg():
         try:
             _update_clip_job(job_id, status="STARTED", phase="extract", progress=0.05, started_at=_time.time())
@@ -170,8 +180,6 @@ def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> 
             _clip_log(job_id, f"Audio extracted — chunked {len(chunks)} segment @180s (total {total/60:.1f} menit)")
             _update_clip_job(job_id, phase="transcribe", progress=0.15)
             _clip_log(job_id, f"Phase: transcribe (Groq {settings.groq_whisper_model}) — {len(chunks)} chunk, rate {settings.groq_rate_limit_per_minute}/m")
-            # run_pipeline_tail akan transkripsi sekuensial dengan throttle + log internal
-            # kita log progress per chunk via wrapper
             result = run_pipeline_tail(meta)
             outputs: list[str] = result.get("outputs", []) if isinstance(result, dict) else []
             _clip_log(job_id, f"Phase: render 9:16 selesai — {len(outputs)} clip")
@@ -184,13 +192,14 @@ def _run_clip_pipeline(src: Path, job_id: str, host_name: str | None = None) -> 
             err = f"{e}\n{traceback.format_exc()[-800:]}"
             _clip_log(job_id, f"FAILURE: {e}")
             _update_clip_job(job_id, status="FAILURE", phase="error", error=str(e)[:1000], finished_at=_time.time())
-            # also store full trace in logs
-            CLIP_LOGS[job_id].append(err)
+            with _CLIP_LOCK:
+                CLIP_LOGS.setdefault(job_id, []).append(err)
 
-    CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS[job_id]), started_at=_time.time())
-    # Use non-daemon thread so shutdown waits for cleanup; no orphan kill
-    threading.Thread(target=_bg, daemon=False).start()
-    return CLIP_JOBS[job_id]
+    with _CLIP_LOCK:
+        CLIP_JOBS[job_id] = JobStatus(job_id=job_id, status="PENDING", phase="queued", progress=0.0, logs=list(CLIP_LOGS.get(job_id, [])), started_at=_time.time())
+        js_ret = CLIP_JOBS[job_id]
+    _CLIP_EXECUTOR.submit(_bg)
+    return js_ret
 
 
 def _disk_info() -> dict:
@@ -322,15 +331,15 @@ def clip_diagnostics() -> dict:
         quota_err = _check_storage_quotas()
     except Exception as e:
         quota_err = str(e)[:500]
-    # job counts
-    jobs_info = {"in_memory": len(CLIP_JOBS), "by_status": {}}
+    with _CLIP_LOCK:
+        jobs_snap = dict(CLIP_JOBS)
+    jobs_info = {"in_memory": len(jobs_snap), "by_status": {}}
     try:
         from collections import Counter
 
-        c = Counter(js.status for js in CLIP_JOBS.values() if js.job_id != ".gitkeep")
+        c = Counter(js.status for js in jobs_snap.values() if js.job_id != ".gitkeep")
         jobs_info["by_status"] = dict(c)
-        # last 3 failures with error snippet
-        fails = [(jid, js.error or js.phase, (js.logs[-1] if js.logs else "")[:300]) for jid, js in CLIP_JOBS.items() if js.status == "FAILURE" and jid != ".gitkeep"]
+        fails = [(jid, js.error or js.phase, (js.logs[-1] if js.logs else "")[:300]) for jid, js in jobs_snap.items() if js.status == "FAILURE" and jid != ".gitkeep"]
         fails = sorted(fails, key=lambda x: x[0])[-3:]
         jobs_info["recent_failures"] = [{"job_id": jid, "error": err, "last_log": log} for jid, err, log in fails]
     except Exception as e:
@@ -358,9 +367,10 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
         while True:
             if await request.is_disconnected():
                 break
-            # snapshot clip jobs (lean mode)
             try:
-                clip_jobs = [js.model_dump(mode="json") for js in list(CLIP_JOBS.values())]
+                with _CLIP_LOCK:
+                    _snap = list(CLIP_JOBS.values())
+                clip_jobs = [js.model_dump(mode="json") for js in _snap]
             except Exception:
                 clip_jobs = []
             # ytdlp jobs
@@ -394,13 +404,13 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
                             renders.append({"job_id": job_dir.name, "filename": p.name, "size": p.stat().st_size, "mtime": p.stat().st_mtime})
             except Exception:
                 pass
-            # disk only every 10 ticks (~15s) to avoid syscall spam
-            disk = None
             if tick % 10 == 0:
                 try:
-                    disk = _disk_info()
+                    disk = await _asyncio.to_thread(_disk_info)
                 except Exception:
                     disk = None
+            else:
+                disk = None
             # health quick
             ffmpeg_ok = True
             try:
@@ -436,12 +446,13 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
                             pass
             except Exception:
                 pass
-            # Overlay redis progress (worker pushes clip:progress:{job_id}=phase|prog|detail)
+            # Overlay redis progress — reuse single connection per SSE, close each tick to avoid FD leak (#7)
+            _r2 = None
             try:
                 import redis as _redis2
                 from app.core.config import get_settings as _gs2
                 _s2 = _gs2()
-                _r2 = _redis2.from_url(_s2.celery_broker_url, socket_connect_timeout=1)
+                _r2 = _redis2.from_url(_s2.celery_broker_url, socket_connect_timeout=1, socket_keepalive=True)
                 for c in clip_jobs:
                     jid = c.get('job_id')
                     if not jid or jid == '.gitkeep':
@@ -458,11 +469,16 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
                                 except: pass
                                 if len(parts) > 2:
                                     c['detail'] = parts[2]
-                                    # append detail to last log line visible in UI tooltip
                     except Exception:
                         pass
             except Exception:
                 pass
+            finally:
+                if _r2 is not None:
+                    try:
+                        _r2.close()
+                    except Exception:
+                        pass
             # Also inject filesystem SUCCESS jobs not in CLIP_JOBS (so render langsung kelihatan)
             try:
                 existing_ids = {c.get('job_id') for c in clip_jobs}
@@ -545,22 +561,23 @@ async def clip_video(request: Request, file: UploadFile = File(...)) -> JobStatu
 @router.get("/jobs/{job_id}", response_model=JobStatus)
 def get_job(job_id: str) -> JobStatus:
     _validate_job_id(job_id)
-    # 1) Cek in-memory CLIP_JOBS (lean mode non-blocking, persist refresh) — sertakan live logs
-    if job_id in CLIP_JOBS:
-        # Jika sudah SUCCESS di memory tapi renders belum ke-detect, sinkronkan
-        js = CLIP_JOBS[job_id]
-        # selalu sync logs terbaru
-        if job_id in CLIP_LOGS:
-            js = js.model_copy(update={"logs": list(CLIP_LOGS[job_id])})
-            CLIP_JOBS[job_id] = js
+    with _CLIP_LOCK:
+        snapshot = CLIP_JOBS.get(job_id)
+        logs_snap = list(CLIP_LOGS.get(job_id, [])) if job_id in CLIP_LOGS else None
+    if snapshot is not None:
+        js = snapshot
+        if logs_snap is not None:
+            js = js.model_copy(update={"logs": logs_snap})
+            with _CLIP_LOCK:
+                CLIP_JOBS[job_id] = js
         if js.status == "SUCCESS" and js.result:
             return js
-        # Update dari storage jika sudah render
         settings = get_settings()
         renders = list((settings.storage_path / "renders" / job_id).glob("*.mp4"))
         if renders:
-            js2 = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=[str(p) for p in renders], logs=list(CLIP_LOGS.get(job_id,[])), started_at=js.started_at, finished_at=_time.time())
-            CLIP_JOBS[job_id] = js2
+            js2 = JobStatus(job_id=job_id, status="SUCCESS", phase="render", progress=1.0, result=[str(p) for p in renders], logs=logs_snap or [], started_at=js.started_at, finished_at=_time.time())
+            with _CLIP_LOCK:
+                CLIP_JOBS[job_id] = js2
             return js2
         return js
     # Try Celery result backend (optional)
@@ -584,10 +601,11 @@ def get_job(job_id: str) -> JobStatus:
         try:
             result = AsyncResult(job_id, app=celery_app)
             state = result.state if result else "PENDING"
-            return JobStatus(job_id=job_id, status=state, phase="unknown", progress=0.0)
+            if state != "PENDING":
+                return JobStatus(job_id=job_id, status=state, phase="unknown", progress=0.0)
         except Exception:
             pass
-    return JobStatus(job_id=job_id, status="PENDING", phase="unknown", progress=0.0)
+    raise HTTPException(status_code=404, detail=f"Job {job_id} tidak ditemukan")
 
 
 @router.post("/clip/from-download", response_model=JobStatus)
@@ -651,10 +669,11 @@ def clip_from_ytdlp_job(job_id: str, host_name: str | None = None) -> JobStatus:
 @router.post("/clip/from-url", response_model=JobStatus)
 async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobStatus:
     """One-click: ytdlp download URL lalu langsung clip (sumber utama ytdlp)."""
-    from app.services.ytdlp_service import create_job, run_download_job
-
-    if not body.url.startswith(("http://", "https://")):
-        raise HTTPException(status_code=400, detail="URL harus diawali http:// atau https://")
+    from app.services.ytdlp_service import create_job, run_download_job, validate_download_url as _vurl
+    try:
+        _vurl(body.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     ytdlp_job = create_job(body.url, {"quality": body.quality, "format": body.format, "audio_only": body.audio_only, "no_playlist": body.no_playlist})
     clip_job_id = str(uuid.uuid4())
@@ -664,23 +683,27 @@ async def clip_from_url(body: ClipFromUrlRequest, bg: BackgroundTasks) -> JobSta
     def _download_then_clip_sync():
         import asyncio as _asyncio
         try:
-            _asyncio.run(run_download_job(ytdlp_job))
+            # new_event_loop avoids RuntimeError when ASGI loop already running
+            _loop = _asyncio.new_event_loop()
+            try:
+                _asyncio.set_event_loop(_loop)
+                _loop.run_until_complete(run_download_job(ytdlp_job))
+            finally:
+                _loop.close()
+                _asyncio.set_event_loop(None)
             if ytdlp_job.status == "completed" and ytdlp_job.filepath:
                 src = Path(ytdlp_job.filepath)
                 if src.exists():
-                    # auto host dari ytdlp uploader jika tidak dikirim manual
                     h = _host or getattr(ytdlp_job, "uploader", None) or getattr(ytdlp_job, "channel", None) or ""
                     _run_clip_pipeline(src, clip_job_id, (h or "").strip() or None)
         except Exception as e:
             ytdlp_job.status = "error"
             ytdlp_job.error = str(e)
 
-    # Use BackgroundTasks so task survives event loop restart / worker reload
     bg.add_task(_download_then_clip_sync)
-    # Pre-register clip job as PENDING for polling
-    CLIP_JOBS[clip_job_id] = JobStatus(job_id=clip_job_id, status="PENDING", phase="downloading", progress=0.0, started_at=_time.time())
-    CLIP_LOGS[clip_job_id] = [f"[{_time.strftime('%H:%M:%S')}] Download queued: {ytdlp_job.job_id} -> clip {clip_job_id}"]
-    # Return clip job id segera; frontend polling /jobs/{clip_job_id} dan /api/ytdlp/jobs/{ytdlp_job.job_id}
+    with _CLIP_LOCK:
+        CLIP_JOBS[clip_job_id] = JobStatus(job_id=clip_job_id, status="PENDING", phase="downloading", progress=0.0, started_at=_time.time())
+        CLIP_LOGS[clip_job_id] = [f"[{_time.strftime('%H:%M:%S')}] Download queued: {ytdlp_job.job_id} -> clip {clip_job_id}"]
     return JobStatus(job_id=clip_job_id, status="PENDING", phase="downloading", progress=0.0)
 
 
@@ -737,8 +760,9 @@ def clip_jobs() -> dict:
                 if clips:
                     jobs.append({"job_id": d.name, "status": "SUCCESS", "files": clips})
                     seen.add(d.name)
-    # 2) in-memory CLIP_JOBS pending/started (fix hilang saat refresh)
-    for jid, js in CLIP_JOBS.items():
+    with _CLIP_LOCK:
+        _clip_snap = dict(CLIP_JOBS)
+    for jid, js in _clip_snap.items():
         if jid not in seen:
             jobs.append({"job_id": jid, "status": js.status, "phase": js.phase, "progress": js.progress, "error": js.error})
             seen.add(jid)
@@ -803,12 +827,12 @@ def delete_render(job_id: str, filename: str):
         path.unlink()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    # hapus folder job jika kosong
     try:
         if base.exists() and not any(base.iterdir()):
             base.rmdir()
-            CLIP_JOBS.pop(job_id, None)
-            CLIP_LOGS.pop(job_id, None)
+            with _CLIP_LOCK:
+                CLIP_JOBS.pop(job_id, None)
+                CLIP_LOGS.pop(job_id, None)
     except Exception:
         pass
     return {"ok": True, "deleted": f"{job_id}/{filename}"}
@@ -829,8 +853,9 @@ def delete_render_job(job_id: str):
         shutil.rmtree(base)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    CLIP_JOBS.pop(job_id, None)
-    CLIP_LOGS.pop(job_id, None)
+    with _CLIP_LOCK:
+        CLIP_JOBS.pop(job_id, None)
+        CLIP_LOGS.pop(job_id, None)
     return {"ok": True, "deleted": job_id}
 
 
@@ -861,8 +886,9 @@ def bulk_delete(body: BulkDeleteRequest):
                 if base.exists():
                     _shutil.rmtree(base)
                     deleted.append(f"renders/{jid}")
-                    CLIP_JOBS.pop(jid, None)
-                    CLIP_LOGS.pop(jid, None)
+                    with _CLIP_LOCK:
+                        CLIP_JOBS.pop(jid, None)
+                        CLIP_LOGS.pop(jid, None)
             except Exception as e:
                 errors.append(f"{jid}: {e}")
 
@@ -917,8 +943,9 @@ def bulk_delete(body: BulkDeleteRequest):
                         try:
                             if d.is_dir() and not any(d.iterdir()):
                                 d.rmdir()
-                                CLIP_JOBS.pop(d.name, None)
-                                CLIP_LOGS.pop(d.name, None)
+                                with _CLIP_LOCK:
+                                    CLIP_JOBS.pop(d.name, None)
+                                    CLIP_LOGS.pop(d.name, None)
                         except Exception:
                             pass
             except Exception as e:

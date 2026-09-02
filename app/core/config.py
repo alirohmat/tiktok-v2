@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 from typing import Final
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="forbid")
 
     # Groq
     groq_api_key: str = ""
@@ -47,6 +48,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     storage_dir: str = "storage"
     music_path: str = "assets/trending.mp3"
+    api_key: str = Field(default="", validation_alias=AliasChoices("CLIPPER_API_KEY", "API_KEY", "api_key"))  # jika set, POST/DELETE butuh X-API-Key
 
     # Watermark handle (fixed, bukan random besar) — atribusi fair use
     tiktok_handle: str = "brogalanblora"
@@ -54,6 +56,13 @@ class Settings(BaseSettings):
     # Niche gate advisory — render tetap, cuma tag skor (tidak block viral)
     niche_mode: str = "advisory"  # advisory|soft|hard
     niche_high_profit_tags: str = "kesehatan,edukasi,keuangan"  # 8-15% high
+
+    # Env ekstra yang ada di .env.example / docker (biar extra=forbid tidak error typo file)
+    ytdlp_download_dir: str = "storage/downloads"
+    redis_port: int = 6379
+    frontend_origin: str = ""
+    cors_allow_origins: str = ""
+    cors_allow_credentials: bool = False
 
     @property
     def storage_path(self) -> Path:
