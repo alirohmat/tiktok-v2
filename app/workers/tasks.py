@@ -287,8 +287,8 @@ def build_chain(src_path: str, job_id: str | None = None) -> Any:
     return chain(start, run_pipeline_tail.s())
 
 
-@celery_app.task(name="app.workers.tasks.run_pipeline_tail")
-def run_pipeline_tail(meta: dict[str, Any]) -> dict[str, Any]:
+@celery_app.task(bind=True, name="app.workers.tasks.run_pipeline_tail")
+def run_pipeline_tail(self, meta: dict[str, Any]) -> dict[str, Any]:
     """
     Podcast panjang: transcribe sekuensial dengan throttle free-tier.
     Eager mode (tanpa broker) tetap hormati groq_rate_limit_per_minute.
@@ -297,6 +297,21 @@ def run_pipeline_tail(meta: dict[str, Any]) -> dict[str, Any]:
 
     settings = get_settings()
     rpm = max(1, getattr(settings, "groq_rate_limit_per_minute", 10))
+    job_id = meta.get("job_id", "")
+    # helper: push progress to redis so api SSE can display live (api and worker are separate containers)
+    def _push_progress(phase: str, prog: float, detail: str = ""):
+        try:
+            import redis as _redis
+            r = _redis.from_url(settings.celery_broker_url, socket_connect_timeout=1)
+            r.setex(f"clip:progress:{job_id}", 3600, f"{phase}|{prog}|{detail}")
+            # also celery state for AsyncResult polling
+            try:
+                self.update_state(state="PROGRESS", meta={"phase": phase, "progress": prog, "detail": detail})
+            except Exception:
+                pass
+        except Exception:
+            pass
+    _push_progress("transcribe", 0.15, f"0/{len(chunks)}")
     min_interval = 60.0 / rpm
 
     chunks: list[dict[str, Any]] = meta["chunks"]
@@ -323,19 +338,25 @@ def run_pipeline_tail(meta: dict[str, Any]) -> dict[str, Any]:
             if "413" in str(exc) or "25 mb" in str(exc).lower():
                 logger.warning("Chunk %s 413, coba rechunk 90s dan skip jika gagal", c["path"])
                 # fallback mock agar pipeline tidak mati total untuk podcast
-                res = {"text": "", "words": [], "segments": [], "_chunk_index": c["index"], "_start_time": c["start_time"]}
+                raise  # no mock — user forbids mock, biar error kelihatan (413 payload)
             else:
                 raise
         results.append(res)
+        _push_progress("transcribe", 0.15 + 0.5 * (idx + 1) / max(1, len(chunks)), f"{idx+1}/{len(chunks)}")
         # jeda tambahan untuk free tier jika chunk banyak
         if idx < len(chunks) - 1:
             # _transcribe_impl sudah throttle, tapi jaga interval tetap
             last_call = _time.time()
 
+    _push_progress("stitch", 0.70, "stitch")
     stitched = stitch(results, meta)
+    _push_progress("analyze", 0.75, "analyze")
     analyzed = analyze(stitched)
+    _push_progress("broll", 0.85, "broll")
     with_broll = source_broll(analyzed)
+    _push_progress("render", 0.90, "render")
     rendered = render_clips(with_broll)
+    _push_progress("done", 1.0, "done")
     return rendered
 
 

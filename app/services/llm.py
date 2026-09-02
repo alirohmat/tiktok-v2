@@ -79,16 +79,18 @@ class MuseClient:
 
     def analyze(self, transcript: Transcript, duration: float | None = None, host_name: str | None = None) -> ClipPlan:
         dur = duration or transcript.duration or 60.0
-        words_preview = transcript.words[:600]
+        # TPM fix: gpt-oss-120b limit 8000 on_demand incl reasoning -> keep <6500 to avoid 413 (was 600w+4000c=8821)
+        max_w = 320 if len(transcript.words) > 500 else 400
+        words_preview = transcript.words[:max_w]
         words_text = " ".join(f"{w.word}[{w.start:.1f}-{w.end:.1f}]" for w in words_preview)
-        if len(transcript.words) > 600:
-            words_text += f" ... (+{len(transcript.words)-600} more words)"
+        if len(transcript.words) > max_w:
+            words_text += f" ... (+{len(transcript.words)-max_w} more words)"
         host = (host_name or "").strip()
         user_prompt = (
             f"Host channel: {host or '-'} (jangan pakai host untuk hook)\n"
             f"Video duration: {dur:.1f}s\n"
             f"Transcript with word timestamps (word[start-end]):\n{words_text}\n\n"
-            f"Full text: {transcript.text[:4000]}\n\n"
+            f"Full text: {transcript.text[:2200]}\n\n"
             f"Select best clips 55-90s each (min15 max90), guest_names=only invited people (trigger: kedatangan/bersama/tamu/menemui/spesial), hook pakai guest_names jika ada, seo_keyword hyphenated, caption keyword first 50 chars, 3-5 hashtags, CTA Share/Save, engagement 3+2, niche profit tier, host_name/guest_names. Return ONLY JSON."
         )
         if not self.api_key or self.api_key == "your_muse_spark_key":
@@ -106,7 +108,7 @@ class MuseClient:
                 response_format={"type": "json_object"},
             )
 
-        # retry 3x 5s on Timeout / HTTP Error per policy
+        # retry 3x 5s + 413 TPM truncate retry (56m transcript -> 413 on gpt-oss-120b 8000 TPM)
         response = None
         last_err = None
         for attempt in range(3):
@@ -116,6 +118,14 @@ class MuseClient:
             except Exception as e:
                 last_err = e
                 msg = str(e).lower()
+                if "413" in msg or "rate_limit_exceeded" in msg or "tokens per minute" in msg or "tpm" in msg:
+                    # truncate further and retry immediately (not mock — error biar kelihatan if still fail)
+                    if attempt == 0:
+                        # cut words_text in half for retry
+                        words_text = words_text[:1200] + " ... [truncated for TPM]"
+                        import time as _t
+                        _t.sleep(1)
+                        continue
                 is_retryable = any(k in msg for k in ("timeout", "timed out", "429", "500", "502", "503", "504", "connection", "http"))
                 is_404 = "404" in str(e) or "model_not_found" in msg or "notfounderror" in type(e).__name__.lower()
                 if is_404:

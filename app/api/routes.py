@@ -327,10 +327,10 @@ def clip_diagnostics() -> dict:
     try:
         from collections import Counter
 
-        c = Counter(js.status for js in CLIP_JOBS.values())
+        c = Counter(js.status for js in CLIP_JOBS.values() if js.job_id != ".gitkeep")
         jobs_info["by_status"] = dict(c)
         # last 3 failures with error snippet
-        fails = [(jid, js.error or js.phase, (js.logs[-1] if js.logs else "")[:300]) for jid, js in CLIP_JOBS.items() if js.status == "FAILURE"]
+        fails = [(jid, js.error or js.phase, (js.logs[-1] if js.logs else "")[:300]) for jid, js in CLIP_JOBS.items() if js.status == "FAILURE" and jid != ".gitkeep"]
         fails = sorted(fails, key=lambda x: x[0])[-3:]
         jobs_info["recent_failures"] = [{"job_id": jid, "error": err, "last_log": log} for jid, err, log in fails]
     except Exception as e:
@@ -387,7 +387,7 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
             try:
                 base = settings.storage_path / "renders"
                 if base.exists():
-                    for job_dir in sorted(base.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)[:12]:
+                    for job_dir in sorted([p for p in base.iterdir() if p.is_dir() and p.name != ".gitkeep"], key=lambda p: p.stat().st_mtime, reverse=True)[:12]:
                         if not job_dir.is_dir():
                             continue
                         for p in sorted(job_dir.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True)[:6]:
@@ -419,6 +419,60 @@ async def clip_events(request: Request):  # type: ignore[no-untyped-def]
                 "ffmpeg": "ok" if ffmpeg_ok else "missing",
                 "tick": tick,
             }
+            # Merge celery AsyncResult for pending jobs (fix: worker di container lain, CLIP_JOBS tidak share — SSE stuck queued)
+            try:
+                from celery.result import AsyncResult as _AR
+                from app.workers.celery_app import celery_app as _CA
+                for c in clip_jobs:
+                    if c.get('status') in ('PENDING','STARTED','PROCESSING','queued') and _CA is not None:
+                        try:
+                            ar = _AR(c.get('job_id'), app=_CA)
+                            if ar and ar.state and ar.state != c.get('status'):
+                                c['status'] = ar.state
+                                if ar.info and isinstance(ar.info, dict):
+                                    c['progress'] = ar.info.get('progress', c.get('progress',0))
+                                    c['phase'] = ar.info.get('phase', c.get('phase',''))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            # Overlay redis progress (worker pushes clip:progress:{job_id}=phase|prog|detail)
+            try:
+                import redis as _redis2
+                from app.core.config import get_settings as _gs2
+                _s2 = _gs2()
+                _r2 = _redis2.from_url(_s2.celery_broker_url, socket_connect_timeout=1)
+                for c in clip_jobs:
+                    jid = c.get('job_id')
+                    if not jid or jid == '.gitkeep':
+                        continue
+                    try:
+                        val = _r2.get(f"clip:progress:{jid}")
+                        if val:
+                            sval = val.decode() if isinstance(val, bytes) else str(val)
+                            parts = sval.split("|", 2)
+                            if len(parts) >= 2:
+                                c['phase'] = parts[0] or c.get('phase','')
+                                try:
+                                    c['progress'] = float(parts[1])
+                                except: pass
+                                if len(parts) > 2:
+                                    c['detail'] = parts[2]
+                                    # append detail to last log line visible in UI tooltip
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Also inject filesystem SUCCESS jobs not in CLIP_JOBS (so render langsung kelihatan)
+            try:
+                existing_ids = {c.get('job_id') for c in clip_jobs}
+                for r in renders:
+                    jid = r.get('job_id')
+                    if jid and jid not in existing_ids and jid != '.gitkeep':
+                        clip_jobs.append({'job_id': jid, 'status': 'SUCCESS', 'phase': 'render', 'progress': 1.0, 'result': [r['filename']]})
+                        existing_ids.add(jid)
+            except Exception:
+                pass
             sig = str(len(clip_jobs)) + "|" + "|".join(f"{c.get('job_id','')[:8]}:{c.get('status','')}:{round(float(c.get('progress',0)),2)}" for c in clip_jobs[:20])
             sig += "|" + str(len(ytdlp_jobs)) + "|" + str(len(renders))
             # always send heartbeat comment to keep connection alive, data only when changed or every 2 ticks
