@@ -72,29 +72,41 @@ def _fmt_ass_time(t: float) -> str:
     cs = int((t - int(t)) * 100)
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-def _write_word_ass(words: list, clip_start: float, clip_end: float, ass_path: Path, hook_text: str = "") -> bool:
-    """Generate per-word kinetic ASS (pop yellow scale 120->100). Returns True if written."""
+def _write_word_ass(words: list, clip_start: float, clip_end: float, ass_path: Path, hook_text: str = "", dead_air: list[tuple[float,float]] | None = None) -> bool:
+    """Generate per-word kinetic ASS (pop yellow scale 125->100). Returns True if written."""
     try:
-        # filter words inside clip
         rel = []
+        da = dead_air or []
+        # normalize da to list of (s,e) relative to clip_start already or absolute? caller passes rel_dead_air relative
+        # da is already rel_dead_air (s,e) in clip timeline 0..dur
+        def _compressed(tm: float) -> float:
+            off = 0.0
+            for s, e in da:
+                if tm >= e:
+                    off += e - s
+                elif tm > s:
+                    off += tm - s
+                    break
+                else:
+                    break
+            return max(0.0, tm - off)
         for w in words:
             ws = float(getattr(w, "start", 0))
             we = float(getattr(w, "end", ws + 0.3))
             if we <= clip_start or ws >= clip_end:
                 continue
-            rs = max(0.0, ws - clip_start)
-            re = min(clip_end - clip_start, we - clip_start)
-            # clamp min duration 0.18s for readability
+            rs_raw = max(0.0, ws - clip_start)
+            re_raw = min(clip_end - clip_start, we - clip_start)
+            rs = _compressed(rs_raw)
+            re = _compressed(re_raw)
             if re - rs < 0.12:
                 re = rs + 0.18
             rel.append((str(getattr(w, "word", "")).strip(), rs, re))
         if not rel:
             return False
         ass_path.parent.mkdir(parents=True, exist_ok=True)
-        # keep only first ~60 words to avoid ASS bloat for 90s clip (rare)
         if len(rel) > 70:
             rel = rel[:70]
-        # build ASS
         lines = []
         lines.append("[Script Info]")
         lines.append("ScriptType: v4.00+")
@@ -104,20 +116,15 @@ def _write_word_ass(words: list, clip_start: float, clip_end: float, ass_path: P
         lines.append("")
         lines.append("[V4+ Styles]")
         lines.append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding")
-        # white with black outline, shadow, centered middle (an5 pos 360,650), yellow highlight via override
         lines.append("Style: Default,DejaVu Sans,52,&H00FFFFFF,&H00FFFF00,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,4,2,5,15,15,35,1")
         lines.append("Style: Hook,DejaVu Sans,56,&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,1,0,0,0,100,100,0,0,1,6,2,5,15,15,200,1")
         lines.append("")
         lines.append("[Events]")
         lines.append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
-        # Optional hook as first 0-3s center top? keep drawtext hook + ASS hook duplicate? skip duplicate if hook_text used in drawtext
-        dur = clip_end - clip_start
         for txt, rs, re in rel:
             if not txt:
                 continue
             txt_esc = txt.replace("{", "(").replace("}", ")").replace("\n", " ")
-            # pop animation: start big yellow -> white, centered at (360, 820) lower-middle (keeps y=80 hook free)
-            # Use an5 middle, pos 360x820 (about 64% height) so SEO y 0.35*1280=448 not overlap
             tag = r"{\an5\pos(360,820)\fscx125\fscy125\c&H00FFFF&\t(0,120,\fscx100\fscy100\c&HFFFFFF&)}"
             lines.append(f"Dialogue: 0,{_fmt_ass_time(rs)},{_fmt_ass_time(re)},Default,,0,0,0,,{tag}{txt_esc}")
         ass_path.write_text("\n".join(lines), encoding="utf-8")
@@ -144,9 +151,10 @@ class FFmpegBuilder:
         output: Path,
         transcript: Transcript | None = None,
         music_path: Path | None = None,
-        enable_ultrasonic: bool = True,
+        enable_ultrasonic: bool = False,
         enable_zoompan: bool = True,
         enable_noise: bool = True,
+        enable_audio_alter: bool = False,
     ) -> None:
         self.src = src
         self.output = output
@@ -155,6 +163,7 @@ class FFmpegBuilder:
         self.enable_ultrasonic = enable_ultrasonic
         self.enable_zoompan = enable_zoompan
         self.enable_noise = enable_noise
+        self.enable_audio_alter = enable_audio_alter
     def build_command(
         self,
         clip_start: float,
@@ -322,7 +331,7 @@ class FFmpegBuilder:
                 # unique per clip when same output stem reused: append start
                 if ass_path.exists():
                     ass_path = self.output.parent / f"{self.output.stem}_{int(clip_start)}.ass"
-                ok = _write_word_ass(self.transcript.words, clip_start, clip_end, ass_path, hook_text)
+                ok = _write_word_ass(self.transcript.words, clip_start, clip_end, ass_path, hook_text, rel_dead_air)
                 if ok and ass_path.exists():
                     # escape colon and single quote for filter_complex
                     ass_str = str(ass_path).replace(":", "\\:").replace("'", "")
@@ -337,11 +346,12 @@ class FFmpegBuilder:
 
         a_label = "0:a"
         next_a = "a0"
-        filter_parts.append(
-            f"[{a_label}]asetrate=48480,aresample=48000,atempo=1/1.01[{next_a}];"
-        )
-        a_label = next_a
-        next_a = f"a{len(filter_parts)+20}"
+        if self.enable_audio_alter:
+            filter_parts.append(
+                f"[{a_label}]asetrate=48480,aresample=48000,atempo=1/1.01[{next_a}];"
+            )
+            a_label = next_a
+            next_a = f"a{len(filter_parts)+20}"
         if rel_dead_air:
             expr_a = "+".join(f"between(t\\,{s:.3f}\\,{e:.3f})" for s, e in rel_dead_air)
             nxt_a_da2 = f"a{len(filter_parts)+85}"
@@ -350,10 +360,12 @@ class FFmpegBuilder:
             next_a = f"a{len(filter_parts)+86}"
 
         if self.enable_ultrasonic:
+            _dead_sum = sum(e - s for s, e in rel_dead_air) if rel_dead_air else 0.0
+            _ultra_dur = max(1.0, duration - _dead_sum)
             filter_parts.append(
-                f"sine=frequency=19000:sample_rate=48000:duration={duration:.2f}:beep_factor=1[ultra];"
+                f"sine=frequency=19000:sample_rate=48000:duration={_ultra_dur:.2f}:beep_factor=1[ultra];"
                 f"[ultra]volume=0.015[ultra_vol];"
-                f"[{a_label}][ultra_vol]amix=inputs=2:duration=longest:dropout_transition=0[{next_a}];"
+                f"[{a_label}][ultra_vol]amix=inputs=2:duration=first:dropout_transition=0[{next_a}];"
             )
             a_label = next_a
             next_a = f"a{len(filter_parts)+30}"

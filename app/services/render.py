@@ -19,14 +19,16 @@ class RenderEngine:
     def __init__(
         self,
         music_path: Path | None = None,
-        enable_ultrasonic: bool = True,
+        enable_ultrasonic: bool = False,
         enable_zoompan: bool = True,
         enable_noise: bool = True,
+        enable_audio_alter: bool = False,
     ) -> None:
         self.music_path = music_path
         self.enable_ultrasonic = enable_ultrasonic
         self.enable_zoompan = enable_zoompan
         self.enable_noise = enable_noise
+        self.enable_audio_alter = enable_audio_alter
 
     def render_clip(
         self,
@@ -72,6 +74,7 @@ class RenderEngine:
             enable_ultrasonic=self.enable_ultrasonic,
             enable_zoompan=self.enable_zoompan,
             enable_noise=self.enable_noise,
+            enable_audio_alter=self.enable_audio_alter,
         )
         cmd = builder.build_command(
             clip_start=clip.start_time,
