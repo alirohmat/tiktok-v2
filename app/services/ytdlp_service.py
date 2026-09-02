@@ -487,7 +487,8 @@ async def run_download_job(job: YtdlpJob):
             prog = parse_progress_line(decoded)
             if prog:
                 if prog.get("pct") is not None:
-                    job.progress = float(prog["pct"])
+                    # pct is 0-100 from yt-dlp; store 0-1 for frontend *100
+                    job.progress = float(prog["pct"]) / 100.0
                 if prog.get("speed"):
                     job.speed = prog["speed"]
                 if prog.get("eta"):
