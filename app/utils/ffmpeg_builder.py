@@ -383,7 +383,12 @@ class FFmpegBuilder:
             filter_complex = filter_complex[:-1]
         if filter_complex:
             cmd += ["-filter_complex", filter_complex]
-            cmd += ["-map", f"[{final_v}]", "-map", f"[{a_label}]"]
+            cmd += ["-map", f"[{final_v}]"]
+            # a_label may still be raw 0:a (no audio filter) -> map without brackets
+            if a_label == "0:a":
+                cmd += ["-map", "0:a"]
+            else:
+                cmd += ["-map", f"[{a_label}]"]
         else:
             cmd += ["-map", "0:v", "-map", "0:a"]
 
