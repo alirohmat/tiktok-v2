@@ -317,6 +317,7 @@ def run_pipeline_tail(self, meta: dict[str, Any]) -> dict[str, Any]:
     settings = get_settings()
     rpm = max(1, getattr(settings, "groq_rate_limit_per_minute", 10))
     job_id = meta.get("job_id", "")
+    chunks: list[dict[str, Any]] = meta["chunks"]
     # helper: push progress to redis so api SSE can display live (api and worker are separate containers)
     def _push_progress(phase: str, prog: float, detail: str = ""):
         try:
@@ -332,8 +333,6 @@ def run_pipeline_tail(self, meta: dict[str, Any]) -> dict[str, Any]:
             pass
     _push_progress("transcribe", 0.15, f"0/{len(chunks)}")
     min_interval = 60.0 / rpm
-
-    chunks: list[dict[str, Any]] = meta["chunks"]
     # Estimasi untuk podcast: 60 menit -> 20 chunk -> ~2 menit di free tier (10/m)
     # log biar user paham durasi
     if len(chunks) > 5:
