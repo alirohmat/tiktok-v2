@@ -52,7 +52,7 @@ def _escape_drawtext(text: str) -> str:
         t = t.replace(";", "\\;")
         t = t.replace('"', "")
         out.append(t)
-    return "\\n".join(out) if len(out) > 1 else out[0] if out else ""
+    return "\n".join(out) if len(out) > 1 else out[0] if out else ""
 
 def _fontfile_arg() -> str:
     cand = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
