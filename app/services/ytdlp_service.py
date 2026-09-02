@@ -356,6 +356,7 @@ def build_download_cmd(
         elif format_pref == "webm":
             cmd += ["--merge-output-format", "webm"]
 
+    cmd += ["--write-info-json"]
     if with_subs:
         cmd += ["--write-subs", "--write-auto-subs", "--sub-langs", "id,en", "--embed-subs"]
 
@@ -368,6 +369,27 @@ def build_download_cmd(
     cmd.append(url)
     return cmd
 
+
+
+def load_yt_info(src: Path) -> dict:
+    """Load sidecar .info.json next to src if exists — for NLP context."""
+    try:
+        # src like "title [id].mp4" -> same stem .info.json
+        cand = src.with_suffix(".info.json")
+        # yt-dlp --write-info-json creates file with same name but .info.json extension
+        # e.g. video.mp4.info.json or title [id].info.json ; also try src.parent glob
+        if cand.exists():
+            import json as _j
+            return _j.loads(cand.read_text(encoding="utf-8", errors="ignore"))
+        # fallback glob id
+        import json as _j2
+        for q in src.parent.glob("*.info.json"):
+            # most recent
+            try:
+                return _j2.loads(q.read_text(encoding="utf-8", errors="ignore"))
+            except: continue
+    except: pass
+    return {}
 
 def _dir_stats(d: Path) -> tuple[int, int]:
     try:

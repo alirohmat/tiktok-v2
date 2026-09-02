@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import random
 import subprocess
 import tempfile
@@ -165,6 +166,8 @@ class FFmpegBuilder:
         seo_keyword: str = "",
         cta_text: str = "",
         crop_window: tuple[int, int, int, int] | None = None,
+        source_channel: str = "",
+        tiktok_handle: str = "brogalanblora",
     ) -> list[str]:
         """
         Build full ffmpeg command argv list for one clip.
@@ -286,6 +289,30 @@ class FFmpegBuilder:
             next_cta = f"v{len(filter_parts)+45}"
             filter_parts.append(f"[{v_label}]drawtext=text='{safe_cta}'{ff3}:fontcolor=white:fontsize={cta_fs}:box=1:boxcolor=red@0.7:boxborderw=10:x=(w-text_w)/2:y={cta_y}{ls3}:enable='gte(t,{duration-5:.1f})'[{next_cta}];")
             v_label = next_cta
+
+        
+        # Watermark subtle fixed: @handle • src: channel (fair use atribusi, bukan random besar)
+        # fontsize 16 alpha 0.18 di h-28, tidak nutup hook y=50 / CTA h-160 / ASS 360,820
+        try:
+            handle = (tiktok_handle or "brogalanblora").strip().lstrip("@")[:24] or "brogalanblora"
+            ch = (source_channel or "").strip()[:36]
+            # clean channel: remove special chars that break drawtext
+            if ch:
+                # keep alnum space - _
+                ch = re.sub(r"[^\w\s\-]", "", ch).strip()
+                ch = " ".join(ch.split())  # collapse
+                wm_text = f"@{handle} \u2022 src: {ch}" if ch else f"@{handle}"
+            else:
+                wm_text = f"@{handle}"
+            if wm_text:
+                safe_wm = _escape_drawtext(wm_text)
+                ff_wm = _fontfile_arg()
+                next_wm = f"v{len(filter_parts)+90}"
+                # alpha 0.18 subtle, box@0.35 small border 4
+                filter_parts.append(f"[{v_label}]drawtext=text='{safe_wm}'{ff_wm}:fontcolor=white@0.18:fontsize=16:box=1:boxcolor=black@0.35:boxborderw=4:x=w-text_w-14:y=h-28:enable='gte(t,0)'[{next_wm}];")
+                v_label = next_wm
+        except Exception:
+            pass
 
         # Kinetic per-word ASS (pop yellow) — after all drawtext so words on top
         ass_added = False

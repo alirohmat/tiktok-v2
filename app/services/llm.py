@@ -77,7 +77,7 @@ class MuseClient:
         self.base_url = base_url or settings.muse_base_url
         self.model = model or settings.muse_model
 
-    def analyze(self, transcript: Transcript, duration: float | None = None, host_name: str | None = None) -> ClipPlan:
+    def analyze(self, transcript: Transcript, duration: float | None = None, host_name: str | None = None, yt_meta: dict | None = None) -> ClipPlan:
         dur = duration or transcript.duration or 60.0
         # TPM fix: gpt-oss-120b limit 8000 on_demand incl reasoning -> keep <6500 to avoid 413 (was 600w+4000c=8821)
         max_w = 320 if len(transcript.words) > 500 else 400
@@ -86,7 +86,16 @@ class MuseClient:
         if len(transcript.words) > max_w:
             words_text += f" ... (+{len(transcript.words)-max_w} more words)"
         host = (host_name or "").strip()
+        yt = yt_meta or {}
+        yt_title = (yt.get("title") or yt.get("fulltitle") or "").strip()[:120]
+        yt_channel = (yt.get("uploader") or yt.get("channel") or yt.get("uploader_id") or "").strip()[:80]
+        yt_desc = (yt.get("description") or "").strip()[:400]
+        # NLP context only — hook must be NEW from transcript, not copy title verbatim (curiosity gap 5-12w)
+        yt_block = ""
+        if yt_title or yt_channel:
+            yt_block = f"YT metadata (konteks NLP, JANGAN copy verbatim jadi hook — buat hook baru dari transcript):\nTitle: {yt_title or '-'}\nChannel: {yt_channel or '-'}\nDesc: {yt_desc[:300] if yt_desc else '-'}\n"
         user_prompt = (
+            f"{yt_block}"
             f"Host channel: {host or '-'} (jangan pakai host untuk hook)\n"
             f"Video duration: {dur:.1f}s\n"
             f"Transcript with word timestamps (word[start-end]):\n{words_text}\n\n"

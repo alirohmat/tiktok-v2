@@ -146,7 +146,18 @@ def extract_and_chunk(src_path: str, job_id: str, host_name: str = "") -> dict[s
 
     total_duration = get_duration(effective_src)
     logger.info("Podcast chunked: %.1f menit -> %s chunk @%ss (free tier aman)", total_duration / 60, len(chunks), chunk_sec)
-    return {"job_id": job_id, "src": src_path, "effective_src": str(effective_src), "chunks": chunks, "total_duration": total_duration, "host_name": host_name}
+    # NLP context: load .info.json sidecar from ytdlp --write-info-json
+    yt_meta: dict = {}
+    try:
+        from app.services.ytdlp_service import load_yt_info
+        yt_meta = load_yt_info(src) or {}
+        # keep only needed keys to avoid bloating celery payload
+        yt_meta = {k: yt_meta.get(k) for k in ("title","fulltitle","uploader","channel","uploader_id","description","view_count","duration","webpage_url") if yt_meta.get(k)}
+        if yt_meta.get("description"):
+            yt_meta["description"] = str(yt_meta["description"])[:800]
+    except Exception:
+        yt_meta = {}
+    return {"job_id": job_id, "src": src_path, "effective_src": str(effective_src), "chunks": chunks, "total_duration": total_duration, "host_name": host_name, "yt_meta": yt_meta}
 
 
 @celery_app.task(name="app.workers.tasks.stitch")
@@ -168,6 +179,7 @@ def stitch(results: list[dict[str, Any]], meta: dict[str, Any]) -> dict[str, Any
         "transcript": transcript.model_dump(mode="json"),
         "total_duration": total_duration,
         "host_name": meta.get("host_name", ""),
+        "yt_meta": meta.get("yt_meta", {}),
     }
 
 
@@ -178,13 +190,15 @@ def analyze(data: dict[str, Any]) -> dict[str, Any]:
     transcript = Transcript.model_validate(data["transcript"])
     total_duration: float = data["total_duration"]
     host_name = (data.get("host_name") or data.get("uploader") or "").strip()
+    yt_meta = data.get("yt_meta") or {}
     client = MuseClient()
-    plan = client.analyze(transcript, duration=total_duration, host_name=host_name or None)
+    plan = client.analyze(transcript, duration=total_duration, host_name=host_name or None, yt_meta=yt_meta)
     return {
         "job_id": data["job_id"],
         "src": data["src"],
         "effective_src": data.get("effective_src", data["src"]),
         "host_name": host_name,
+        "yt_meta": yt_meta,
         "transcript": data["transcript"],
         "clip_plan": plan.model_dump(mode="json"),
         "total_duration": total_duration,
@@ -228,6 +242,8 @@ def source_broll(data: dict[str, Any]) -> dict[str, Any]:
         "job_id": data["job_id"],
         "src": data["src"],
         "effective_src": data.get("effective_src", data["src"]),
+        "host_name": data.get("host_name", ""),
+        "yt_meta": data.get("yt_meta", {}),
         "transcript": data["transcript"],
         "clip_plan": data["clip_plan"],
         "broll_map": broll_map,
@@ -262,8 +278,11 @@ def render_clips(data: dict[str, Any]) -> dict[str, Any]:
         logger.warning("PASS 2 dead_air export skip: %s", exc)
 
     output_dir = settings.storage_path / "renders" / job_id
+    yt_meta = data.get("yt_meta") or {}
+    host_name2 = (data.get("host_name") or yt_meta.get("uploader") or yt_meta.get("channel") or "").strip()
+    source_channel = (yt_meta.get("uploader") or yt_meta.get("channel") or host_name2 or "").strip()[:40]
     engine = RenderEngine(music_path=music_path)
-    outputs = engine.render_all(src, transcript, plan, broll_map, output_dir)
+    outputs = engine.render_all(src, transcript, plan, broll_map, output_dir, source_channel=source_channel)
     return {
         "job_id": job_id,
         "outputs": [str(p) for p in outputs],

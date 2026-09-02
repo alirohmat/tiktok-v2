@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     storage_dir: str = "storage"
     music_path: str = "assets/trending.mp3"
 
+    # Watermark handle (fixed, bukan random besar) — atribusi fair use
+    tiktok_handle: str = "brogalanblora"
+
     @property
     def storage_path(self) -> Path:
         p = Path(self.storage_dir)

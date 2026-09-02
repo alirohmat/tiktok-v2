@@ -143,6 +143,20 @@
       loadSources(); loadStorageStats();
     }catch(e){ alert(e.message); } finally{ bulkBusy=false; }
   }
+  let fetchingMeta=new Set();
+  async function fetchMetaSilent(job_id){
+    if(metaCache[job_id] || fetchingMeta.has(job_id)) return;
+    fetchingMeta.add(job_id);
+    try{
+      const r=await fetch(`/clip/job-meta/${job_id}`);
+      const j=await r.json();
+      if(r.ok){ metaCache[job_id]=j; metaCache={...metaCache}; }
+    }catch(e){} finally{ fetchingMeta.delete(job_id); }
+  }
+  function prefetchClipMeta(list){ for(const j of (list||[])){ if(j.status==='SUCCESS' || j.status==='FAILURE' || j.progress>=0.9) fetchMetaSilent(j.job_id); } }
+  function prefetchRenderMeta(list){ for(const r of (list||[])) fetchMetaSilent(r.job_id); }
+  $: prefetchClipMeta(clipList)
+  $: prefetchRenderMeta(rendList)
   async function viewMeta(job_id){
     if(metaCache[job_id]) { metaCache[job_id]=null; return; }
     try{
@@ -273,8 +287,18 @@
               {#if j.error}<div class="mt-2 p-2 rounded bg-red-950/30 border border-red-900 text-xs break-all">{j.error}</div>{/if}
               {#if j.result}<div class="mt-2 text-xs">Outputs: {j.result.length} file</div>{/if}
               {#if j.logs && j.logs.length}<details class="mt-2"><summary class="text-xs text-zinc-400 cursor-pointer">logs {j.logs.length}</summary><pre class="mt-1 p-2 rounded bg-zinc-950 border border-zinc-800 text-[11px] overflow-auto max-h-[160px]">{j.logs.slice(-80).join('\n')}</pre></details>{/if}
+              {#if metaCache[j.job_id] && metaCache[j.job_id].captions}
+                <div class="mt-2 p-2 rounded-xl bg-zinc-950 border border-zinc-800 text-xs">
+                  {#each Object.entries(metaCache[j.job_id].captions).slice(0,3) as [fname, cap]}
+                    <div class="truncate"><span class="text-zinc-500">{fname.slice(0,22)}:</span> {cap.slice(0,90)}{cap.length>90?'…':''}</div>
+                  {/each}
+                  {#if metaCache[j.job_id].engagement}
+                    <div class="mt-1 text-[11px] text-zinc-400">#{metaCache[j.job_id].engagement.niche_tag||''} { (metaCache[j.job_id].engagement.comments||[]).slice(0,1).join(' ') }</div>
+                  {/if}
+                </div>
+              {/if}
               <div class="mt-2 flex gap-2"><button on:click={()=>viewMeta(j.job_id)} class="text-xs px-3 py-1 rounded-full bg-zinc-800">{metaCache[j.job_id] ? 'Tutup meta' : 'Meta CTA/SEO'}</button><a href="/jobs/{j.job_id}" target="_blank" class="text-xs px-3 py-1 rounded-full bg-zinc-800">/jobs/{j.job_id.slice(0,8)}</a></div>
-              {#if metaCache[j.job_id]}<pre class="mt-2 p-2 rounded bg-zinc-950 border border-zinc-800 text-[11px] overflow-auto max-h-[200px]">{JSON.stringify(metaCache[j.job_id], null, 2)}</pre>{/if}
+              {#if metaCache[j.job_id]}<details class="mt-2"><summary class="text-[11px] text-zinc-500 cursor-pointer">raw JSON</summary><pre class="mt-1 p-2 rounded bg-zinc-950 border border-zinc-800 text-[11px] overflow-auto max-h-[200px]">{JSON.stringify(metaCache[j.job_id], null, 2)}</pre></details>{/if}
             </div>
           {/each}
         </div>
@@ -295,7 +319,14 @@
                 <button on:click={()=>delRender(r.job_id, r.filename)} class="px-2 py-1 rounded-full bg-red-900 text-red-200 text-xs">Hapus</button>
                 <button on:click={()=>viewMeta(r.job_id)} class="px-2 py-1 rounded-full bg-zinc-800 text-xs">Meta</button>
               </div>
-              {#if metaCache[r.job_id]}<pre class="mt-2 p-2 rounded bg-zinc-950 text-[11px] overflow-auto max-h-[160px]">{JSON.stringify(metaCache[r.job_id], null, 2)}</pre>{/if}
+              {#if metaCache[r.job_id] && metaCache[r.job_id].captions}
+                <div class="mt-2 p-1.5 rounded bg-zinc-950 border border-zinc-800 text-[11px] leading-tight">
+                  {#each Object.values(metaCache[r.job_id].captions).slice(0,1) as cap}
+                    <div class="line-clamp-2">{cap.slice(0,120)}{cap.length>120?'…':''}</div>
+                  {/each}
+                </div>
+              {/if}
+              {#if metaCache[r.job_id]}<details class="mt-1"><summary class="text-[11px] text-zinc-600 cursor-pointer">meta</summary><pre class="p-2 rounded bg-zinc-950 text-[11px] overflow-auto max-h-[160px]">{JSON.stringify(metaCache[r.job_id], null, 2)}</pre></details>{/if}
             </div>
           {/each}
         </div>

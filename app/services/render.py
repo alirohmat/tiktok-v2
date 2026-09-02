@@ -37,6 +37,8 @@ class RenderEngine:
         broll_paths: list[Path],
         output: Path,
         build_only: bool = False,
+        source_channel: str = "",
+        tiktok_handle: str = "brogalanblora",
     ) -> Path | list[str]:
         """
         Render a single clip with DNA alterations.
@@ -81,6 +83,8 @@ class RenderEngine:
             seo_keyword=clip.seo_keyword or _slug(clip.hook_text),
             cta_text=clip.cta_text or "Save video ini & Share ke teman →",
             crop_window=crop_window,
+            source_channel=source_channel,
+            tiktok_handle=tiktok_handle,
         )
         if build_only:
             return cmd
@@ -94,6 +98,7 @@ class RenderEngine:
         clip_plan: ClipPlan,
         broll_map: dict[str, Path],
         output_dir: Path,
+        source_channel: str | None = None,
     ) -> list[Path]:
         """
         Render all clips in plan. broll_map: keyword -> local preview path.
@@ -116,6 +121,14 @@ class RenderEngine:
         except Exception:
             pass
 
+        # resolve handle from config
+        try:
+            from app.core.config import get_settings as _gs2
+            _handle = (_gs2().tiktok_handle or "brogalanblora").strip()
+        except Exception:
+            _handle = "brogalanblora"
+        _src_ch = (source_channel or "").strip()[:40]
+
         for idx, clip in enumerate(clip_plan.clips):
             relevant_cues = [c for c in clip_plan.broll_cues if clip.start_time <= c.timestamp <= clip.end_time]
             paths: list[Path] = []
@@ -128,7 +141,7 @@ class RenderEngine:
             kw = re.sub(r"[^a-z0-9-]+", "-", kw.lower()).strip("-")[:40] or "viral-clip"
             out = output_dir / f"{kw}-{idx:02d}_{clip.start_time:.0f}_{clip.end_time:.0f}.mp4"
             # sanitize: ensure no spaces
-            self.render_clip(src, clip, transcript, clip_plan, paths, out)
+            self.render_clip(src, clip, transcript, clip_plan, paths, out, source_channel=_src_ch, tiktok_handle=_handle)
             outputs.append(out)
 
             # Sidecar caption.txt (patch 1: keyword first 50 chars + hashtags)
