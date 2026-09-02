@@ -19,18 +19,39 @@ except ImportError:
         return None
 
 
+def _wrap_text(text: str, max_chars: int = 22) -> str:
+    words = text.strip().split()
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        if len(cur) + len(w) + (1 if cur else 0) <= max_chars:
+            cur = cur + (" " if cur else "") + w
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+            while len(cur) > max_chars:
+                lines.append(cur[:max_chars])
+                cur = cur[max_chars:]
+    if cur:
+        lines.append(cur)
+    return "\n".join(lines)
+
 def _escape_drawtext(text: str) -> str:
-    r"""Escape drawtext text for filter_complex: \ : ' % [ ] ;"""
-    t = text.replace("\\", "\\\\")
-    t = t.replace(":", "\\:")
-    t = t.replace("'", "\\'")
-    t = t.replace("%", "\\%")
-    t = t.replace("[", "\\[")
-    t = t.replace("]", "\\]")
-    t = t.replace(";", "\\;")
-    t = t.replace("\n", " ")
-    t = t.replace('"', "")
-    return t
+    r"""Escape drawtext text for filter_complex: \ : ' % [ ] ; — keeps \n for wrap"""
+    parts = text.split("\n")
+    out: list[str] = []
+    for part in parts:
+        t = part.replace("\\", "\\\\")
+        t = t.replace(":", "\\:")
+        t = t.replace("'", "\\'")
+        t = t.replace("%", "\\%")
+        t = t.replace("[", "\\[")
+        t = t.replace("]", "\\]")
+        t = t.replace(";", "\\;")
+        t = t.replace('"', "")
+        out.append(t)
+    return "\\n".join(out) if len(out) > 1 else out[0] if out else ""
 
 def _fontfile_arg() -> str:
     cand = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
@@ -224,31 +245,45 @@ class FFmpegBuilder:
             )
             v_label = out_v
 
-        # Hook drawtext top-third y=80 0-3s
+        # Hook drawtext top-third y=80 0-3s — wrap 2 baris anti-potong 720px
         if hook_text:
-            safe_hook = _escape_drawtext(hook_text)
+            wrapped_hook = _wrap_text(hook_text, 22)
+            nlines = wrapped_hook.count("\n") + 1
+            hook_fs = 44 if nlines > 1 or len(hook_text) > 32 else 60
+            hook_y = 50 if nlines > 1 else 80
+            ls = ":line_spacing=10" if nlines > 1 else ""
+            safe_hook = _escape_drawtext(wrapped_hook)
             ff = _fontfile_arg()
             filter_parts.append(
-                f"[{v_label}]drawtext=text='{safe_hook}'{ff}:fontcolor=white:fontsize=60:box=1:boxcolor=black@0.75:boxborderw=12:x=(w-text_w)/2:y=80:enable='between(t,0,3)'[{next_v}];"
+                f"[{v_label}]drawtext=text='{safe_hook}'{ff}:fontcolor=white:fontsize={hook_fs}:box=1:boxcolor=black@0.75:boxborderw=12:x=(w-text_w)/2:y={hook_y}{ls}:enable='between(t,0,3)'[{next_v}];"
             )
             v_label = next_v
             next_v = f"v{len(filter_parts)+1}"
             # ponytail: per-word kinetic uses ASS below, not drawtext loop
 
-        # SEO keyword 0.2-2.7s yellow
+        # SEO keyword 0.2-2.7s yellow — wrap juga
         if seo_keyword:
-            safe_kw = _escape_drawtext(seo_keyword.replace("-", " ").upper())
+            wrapped_kw = _wrap_text(seo_keyword.replace("-", " ").upper(), 20)
+            nkw = wrapped_kw.count("\n") + 1
+            kw_fs = 36 if nkw > 1 else 48
+            ls2 = ":line_spacing=8" if nkw > 1 else ""
+            safe_kw = _escape_drawtext(wrapped_kw)
             ff2 = _fontfile_arg()
             next_kw = f"v{len(filter_parts)+44}"
-            filter_parts.append(f"[{v_label}]drawtext=text='{safe_kw}'{ff2}:fontcolor=yellow:fontsize=48:box=1:boxcolor=black@0.55:boxborderw=8:x=(w-text_w)/2:y=(h*0.35):enable='between(t,0.2,2.7)'[{next_kw}];")
+            filter_parts.append(f"[{v_label}]drawtext=text='{safe_kw}'{ff2}:fontcolor=yellow:fontsize={kw_fs}:box=1:boxcolor=black@0.55:boxborderw=8:x=(w-text_w)/2:y=(h*0.35){ls2}:enable='between(t,0.2,2.7)'[{next_kw}];")
             v_label = next_kw
 
-        # CTA last 5s
+        # CTA last 5s — wrap jika >28 char
         if cta_text:
-            safe_cta = _escape_drawtext(cta_text)
+            wrapped_cta = _wrap_text(cta_text, 28) if len(cta_text) > 28 else cta_text
+            ncta = wrapped_cta.count("\n") + 1
+            cta_fs = 32 if ncta > 1 else 38
+            cta_y = "h-190" if ncta > 1 else "h-160"
+            ls3 = ":line_spacing=6" if ncta > 1 else ""
+            safe_cta = _escape_drawtext(wrapped_cta)
             ff3 = _fontfile_arg()
             next_cta = f"v{len(filter_parts)+45}"
-            filter_parts.append(f"[{v_label}]drawtext=text='{safe_cta}'{ff3}:fontcolor=white:fontsize=38:box=1:boxcolor=red@0.7:boxborderw=10:x=(w-text_w)/2:y=h-160:enable='gte(t,{duration-5:.1f})'[{next_cta}];")
+            filter_parts.append(f"[{v_label}]drawtext=text='{safe_cta}'{ff3}:fontcolor=white:fontsize={cta_fs}:box=1:boxcolor=red@0.7:boxborderw=10:x=(w-text_w)/2:y={cta_y}{ls3}:enable='gte(t,{duration-5:.1f})'[{next_cta}];")
             v_label = next_cta
 
         # Kinetic per-word ASS (pop yellow) — after all drawtext so words on top
